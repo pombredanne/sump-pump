@@ -1,0 +1,37 @@
+libnsort.so.1 {
+	global:
+		sp_get_version;
+		sp_get_id;
+		sp_start;
+		sp_argv_to_str;
+		sp_start_sort;
+		sp_get_sort_stats;
+		sp_link;
+		sp_write_input;
+		sp_get_write_buf;
+		sp_read_output;
+		sp_get_error;
+		sp_upstream_error;
+		sp_wait;
+		sp_open_file_src;
+		sp_open_file_dst;
+		sp_file_wait;
+		sp_get_error_string;
+		pfunc_get_rec;
+		pfunc_get_in_buf;
+		pfunc_get_out_buf;
+		pfunc_put_out_buf_bytes;
+		pfunc_get_thread_index;
+		pfunc_get_task_number;
+		pfunc_write;
+		pfunc_printf;
+		pfunc_error;
+		pfunc_mutex_lock;
+		pfunc_mutex_unlock;
+	local:
+		*;
+};
+
+
+
+
