@@ -33,6 +33,13 @@ reg: $(REG_TESTS) $(REG_FILES)
 
 perf: $(PERF_TESTS) $(PERF_FILES)
 
+# Install rule to place the sump pump library in the library directory, 
+# and the sump.h file in the include directory.
+# 
+# Note that it is not necessary to "install" sump pump in order to use it.
+# Without an "install", you should have the library in a directory that 
+# is in your LD_LIBRARY_PATH environment variable.
+#
 install: $(LIB)
 	sudo cp $(LIB) /usr/lib64
 	sudo cp sump.h /usr/include
