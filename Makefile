@@ -2,8 +2,8 @@
 #
 # $Revision$
 # 
-#CFLAGS+=-DSVNVERSION="`svnversion`"
-CFLAGS+=-DSVNVERSION=hello
+# This Makefile currently only works for x64 Linux
+#
 
 #regression tests and files
 REG_TESTS=reduce upper upperfixed upperwhole oneshot sumpversion
@@ -17,19 +17,27 @@ PERF_FILES=lookupref.txt lookupin.txt spgzipinput billing_input.txt \
 
 LIB=libsump.so.1
 
-all: $(LIB) $(REG_TESTS) $(REG_FILES) $(PERF_TESTS) $(PERF_FILES)
-
-sump.o: sump.c sump.h sumpversion.h
-	gcc -c -fPIC $(CFLAGS) -g sump.c
-
 $(LIB): sump.o
 	gcc -o $(LIB) -m64 -fPIC -shared -Xlinker -Map -Xlinker mapfile.sump \
 	-Xlinker --version-script=exports.linux sump.o -lpthread -ldl -lrt
 
+all: $(LIB) reg perf
+
+sump.o: sump.c sump.h sumpversion.h
+	gcc -c -fPIC $(CFLAGS) -g sump.c
+
 sumpversion.h: sump.c sump.h
 	(echo -n 'static char *sp_version = "'; svnversion -n; echo '";') > sumpversion.h
 
-#regression tests
+reg: $(REG_TESTS) $(REG_FILES) 
+
+perf: $(PERF_TESTS) $(PERF_FILES)
+
+install: $(LIB)
+	sudo cp $(LIB) /usr/lib64
+	sudo cp sump.h /usr/include
+
+# regression tests
 sumpversion: sumpversion.c $(LIB)
 	gcc -g -o sumpversion sumpversion.c $(LIB)
 
