@@ -1,0 +1,10 @@
+# Make.version
+#
+# $Revision$
+#
+ALPHA=
+MAJOR=1
+MINOR1=0
+MINOR2=0
+MINOR=$(MINOR1).$(MINOR2)$(ALPHA)
+RELEASE=$(MAJOR).$(MINOR)

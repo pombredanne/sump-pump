@@ -5,6 +5,8 @@
 # This Makefile currently only works for x64 Linux
 #
 
+include Make.version
+
 #regression tests and files
 REG_TESTS=reduce upper upperfixed upperwhole oneshot sumpversion
 REG_FILES=rin.txt upper_correct.txt rout0_correct.txt rout1_correct.txt \
@@ -27,7 +29,7 @@ sump.o: sump.c sump.h sumpversion.h
 	gcc -c -fPIC $(CFLAGS) -g sump.c
 
 sumpversion.h: sump.c sump.h
-	(echo -n 'static char *sp_version = "'; svnversion -n; echo '";') > sumpversion.h
+	(echo -n 'static char *sp_version = "'; echo -n $(RELEASE); echo -n ', svn: '; svnversion -n; echo '";') > sumpversion.h
 
 reg: $(REG_TESTS) $(REG_FILES) 
 
