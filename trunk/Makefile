@@ -2,7 +2,7 @@
 #
 # $Revision$
 # 
-# This Makefile currently only works for x64 Linux
+# This Makefile currently only works for x86 and x64 Linux
 #
 
 include Make.version
