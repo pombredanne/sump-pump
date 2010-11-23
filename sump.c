@@ -45,6 +45,10 @@
  *     http://www.ordinal.com/sump.html
  *     http://code.google.com/p/sump-pump/
  */
+#if !defined(__CYGWIN32__)
+# define AIO_CAPABLE
+#endif
+
 #define _GNU_SOURCE
 #include "sump.h"
 #include "sumpversion.h"
@@ -58,14 +62,23 @@
 #include <unistd.h>
 #include <dlfcn.h>
 #include <sched.h>
-#include <aio.h>
+#if defined(AIO_CAPABLE)
+# include <aio.h>
+#endif
 #include <string.h>
 #include <errno.h>
 #include <sys/mman.h>
 #include <stdint.h>
 
-#include "nsort.h"
-#include "nsorterrno.h"
+#if defined(SUMP_PUMP_NO_SORT)
+/* define some nsort typedefs to minimize the number of #if's in this file */
+typedef unsigned nsort_t;	/* nsort context identifier */
+typedef int nsort_msg_t;	/* return status & error message numbers */
+#else
+/* use Nsort include files */
+# include "nsort.h"
+# include "nsorterrno.h"
+#endif
 
 #define TRUE 1
 #define FALSE 0
@@ -187,7 +200,7 @@ struct task_out
 struct sp_task
 {
     struct sump *sp;            /* the "host" sp_t of this task */
-    u8          task_number;    /* task number */
+    size_t      task_number;    /* task number */
     int         thread_index;   /* id of thread performing this task */
     char        *in_buf;        /* input buffer */
     size_t      in_buf_bytes;   /* number of bytes written into in_buf
@@ -292,6 +305,8 @@ struct sump_out
                                            * completely read */
 };
 
+
+#if defined(AIO_CAPABLE)
 /* sump aio struct */ 
 struct sump_aio
 {
@@ -302,6 +317,7 @@ struct sump_aio
     size_t              nbytes;         /* request size */
     struct aiocb        aio;
 };
+#endif
 
 
 /* global sump pump mutex */
@@ -317,25 +333,6 @@ static size_t Default_rw_test_size;
 
 /* default file access mode */
 static int Default_file_mode = MODE_BUFFERED;
-
-/* function pointers to nsort library entry points.  These are 
- * non-NULL if the nsort library is linked in.
- */
-nsort_msg_t (*Nsort_define)(const char *def,
-                            unsigned options,
-                            nsort_error_callback_t *callbacks,
-                            nsort_t *ctxp);
-nsort_msg_t (*Nsort_release_recs)(void *buf, 
-                                  size_t size, 
-                                  nsort_t *ctxp);
-nsort_msg_t (*Nsort_release_end)(nsort_t *ctxp);
-nsort_msg_t (*Nsort_return_recs)(void *buf,
-                                 size_t *size, 
-                                 nsort_t *ctxp);
-nsort_msg_t (*Nsort_end)(nsort_t *ctxp);
-const char *(*Nsort_get_stats)(nsort_t *ctxp);
-char *(*Nsort_message)(nsort_t *ctxp);
-
 
 
 static FILE    *TraceFp;
@@ -383,32 +380,6 @@ static void die(char *fmt, ...)
 }
 
 
-/* get_nsort_syms - dynamically link to nsort library
- */
-static int get_nsort_syms()
-{
-    void        *syms;
-    
-    if ((syms = dlopen("libnsort.so", RTLD_GLOBAL | RTLD_LAZY)) == NULL)
-        return (-1);
-    if ((Nsort_define = dlsym(syms, "nsort_define")) == NULL)
-        return (-2);
-    if ((Nsort_release_recs = dlsym(syms, "nsort_release_recs")) == NULL)
-        return (-2);
-    if ((Nsort_release_end = dlsym(syms, "nsort_release_end")) == NULL)
-        return (-2);
-    if ((Nsort_return_recs = dlsym(syms, "nsort_return_recs")) == NULL)
-        return (-2);
-    if ((Nsort_end = dlsym(syms, "nsort_end")) == NULL)
-        return (-2);
-    if ((Nsort_get_stats = dlsym(syms, "nsort_get_stats")) == NULL)
-        return (-2);
-    if ((Nsort_message = dlsym(syms, "nsort_message")) == NULL)
-        return (-2);
-    return (0);
-}
-
-
 /* init_zero_fd - initialize Zero_fd, the file descriptor for /dev/zero.
  */
 static void init_zero_fd()
@@ -447,19 +418,6 @@ static int start_error(sp_t sp, const char *fmt, ...)
     
     return SP_START_ERROR;
 }
-
-
-/* link_in_nsort - if not already done, dynamically link in the nsort library.
- */
-int link_in_nsort()
-{
-    int ret;
-    
-    pthread_mutex_lock(&Global_lock);
-    ret = Nsort_define == NULL ? get_nsort_syms() : 0;
-    pthread_mutex_unlock(&Global_lock);
-    return (ret);
-}    
 
 
 /* sp_raise_error - raise an error for a sump pump
@@ -501,6 +459,250 @@ void sp_raise_error(sp_t sp, int error_code, const char *fmt, ...)
     pthread_cond_broadcast(&sp->task_output_empty_cond); /* mult sp threads */
     pthread_mutex_unlock(&sp->sump_mtx);
 }
+
+
+#if !defined(SUMP_PUMP_NO_SORT)
+
+/* function pointers to nsort library entry points.  These are 
+ * non-NULL if the nsort library is linked in.
+ */
+nsort_msg_t (*Nsort_define)(const char *def,
+                            unsigned options,
+                            nsort_error_callback_t *callbacks,
+                            nsort_t *ctxp);
+nsort_msg_t (*Nsort_release_recs)(void *buf, 
+                                  size_t size, 
+                                  nsort_t *ctxp);
+nsort_msg_t (*Nsort_release_end)(nsort_t *ctxp);
+nsort_msg_t (*Nsort_return_recs)(void *buf,
+                                 size_t *size, 
+                                 nsort_t *ctxp);
+nsort_msg_t (*Nsort_end)(nsort_t *ctxp);
+const char *(*Nsort_get_stats)(nsort_t *ctxp);
+char *(*Nsort_message)(nsort_t *ctxp);
+
+
+/* get_nsort_syms - internal routine to dynamically link to nsort library
+ */
+static int get_nsort_syms()
+{
+    void        *syms;
+    
+    if ((syms = dlopen("libnsort.so", RTLD_GLOBAL | RTLD_LAZY)) == NULL)
+        return (-1);
+    if ((Nsort_define = dlsym(syms, "nsort_define")) == NULL)
+        return (-2);
+    if ((Nsort_release_recs = dlsym(syms, "nsort_release_recs")) == NULL)
+        return (-2);
+    if ((Nsort_release_end = dlsym(syms, "nsort_release_end")) == NULL)
+        return (-2);
+    if ((Nsort_return_recs = dlsym(syms, "nsort_return_recs")) == NULL)
+        return (-2);
+    if ((Nsort_end = dlsym(syms, "nsort_end")) == NULL)
+        return (-2);
+    if ((Nsort_get_stats = dlsym(syms, "nsort_get_stats")) == NULL)
+        return (-2);
+    if ((Nsort_message = dlsym(syms, "nsort_message")) == NULL)
+        return (-2);
+    return (0);
+}
+
+
+/* link_in_nsort - internal routine to, if not already done, dynamically
+ *                 link in the nsort library.
+ */
+static int link_in_nsort()
+{
+    int ret;
+    
+    pthread_mutex_lock(&Global_lock);
+    ret = Nsort_define == NULL ? get_nsort_syms() : 0;
+    pthread_mutex_unlock(&Global_lock);
+    return (ret);
+}    
+
+
+/* post_nsort_error - internal routine to post an error received from nsort.
+ */
+static void post_nsort_error(sp_t sp, unsigned ret)
+{
+    pthread_mutex_lock(&sp->sump_mtx);
+    if (sp->error_code == SP_OK)  /* if no other error yet, this is the one */
+    {
+        char *msg = (*Nsort_message)(&sp->nsort_ctx);
+        
+        sp->error_code = SP_SORT_EXEC_ERROR;
+        sp->sort_error = ret;
+        if (msg == NULL)
+            msg = "No Nsort error message";
+        strncpy(sp->error_buf, msg, sp->error_buf_size);
+        sp->error_buf[sp->error_buf_size - 1] = '\0';  /* handle overflow */
+    }
+    sp->sort_error = ret;
+    sp->sort_state = SORT_DONE;
+    pthread_cond_broadcast(&sp->task_output_ready_cond);
+    pthread_mutex_unlock(&sp->sump_mtx);
+}
+
+
+#define DIFF_DRCTV      " -diff"
+#define STAT_DRCTV      " -stat"
+
+
+/* sp_start_sort - start an nsort instance with a sump pump wrapper so
+ *                 that its input or output can be assigned to a file or
+ *                 linked to another sump pump.  For instance, the sort
+ *                 input or output can be linked to sump pump performing
+ *                 record pumping such as "map" on input and "reduce"
+ *                 for output.
+ * Parameters:
+ *      sp -       Pointer to where to return newly allocated sp_t 
+ *                 identifier that will be used in as the first
+ *                 argument to all subsequent sp_*() calls.
+ *      flags -    Unsigned int with the following possible values:
+ *                   SP_KEY_DIFF     Output records should be preceded
+ *                                   by a single byte that indicates how
+ *                                   many keys in this record are the
+ *                                   same as in the previous record.
+ *      def -      Nsort sort definition string. 
+ */
+int sp_start_sort(sp_t *caller_sp,
+                  unsigned flags,
+                  char *def_fmt,
+                  ...)
+{
+    int         ret;
+    char        *def_plus = NULL;
+    sp_t        sp;
+    size_t      def_len;
+    char        *def;
+    char        thread_drctv[30];
+
+    *caller_sp = NULL;  /* assume the worst for now */
+    sp = (sp_t)calloc(1, sizeof(struct sump));
+    if (sp == NULL)
+        return (SP_MEM_ALLOC_ERROR);
+    sp->error_buf_size = ERROR_BUF_SIZE;
+    sp->error_buf = (char *)calloc(1, sp->error_buf_size);
+    if (sp->error_buf == NULL)
+        return (SP_MEM_ALLOC_ERROR);
+    *caller_sp = sp;  /* allow access to error_buf even if failure */
+    /* fill in default parameters */
+    sp->num_threads = sysconf(_SC_NPROCESSORS_ONLN);
+    sprintf(thread_drctv, "-process=%d ", sp->num_threads);
+    if (sp->num_outputs > 32)
+        sp->num_outputs = 32;
+    sp->num_outputs = 1;
+    sp->out = (struct sump_out *)calloc(1, sizeof(struct sump_out));
+    sp->delimiter = (void *)"\n";
+    sp->rec_size = 0;
+
+    if (link_in_nsort() != 0)    /* if error */
+    {
+        sp->error_code = SP_NSORT_LINK_FAILURE;
+        sp->sort_state = SORT_DONE;
+        return (sp->error_code);
+    }
+    
+    sp->flags = flags;
+    sp->flags |= SP_SORT;
+
+    if (def_fmt != NULL)
+    {
+        va_list ap;
+        size_t  def_len;
+        
+        va_start(ap, def_fmt);
+        def_len = vsnprintf(NULL, 0, def_fmt, ap);
+        def = (char *)calloc(def_len + 1, 1);
+        va_start(ap, def_fmt);
+        if (vsnprintf(def, def_len + 1, def_fmt, ap) != def_len)
+            die("sp_start_sort: vnsprintf failed to return %d\n", def_len);
+    }
+    else
+        def = "";
+
+    def_len = strlen(def) + 1;  /* plus '\0' */
+    def_len += strlen(STAT_DRCTV);
+    if (flags & SP_KEY_DIFF)  /* if appending " -diff" directive */
+        def_len += strlen(DIFF_DRCTV);
+    def_len += strlen(thread_drctv);
+    def_plus = (char *)malloc(def_len);
+    if (def_plus == NULL)
+        return (SP_MEM_ALLOC_ERROR);
+    strcpy(def_plus, thread_drctv); /* goes first so caller can override */
+    strcat(def_plus, def);
+    strcat(def_plus, STAT_DRCTV);
+    if (flags & SP_KEY_DIFF)
+        strcat(def_plus, DIFF_DRCTV);
+    ret = (*Nsort_define)(def_plus, 0, NULL, &sp->nsort_ctx);
+    free(def_plus);
+    if (def_fmt != NULL)
+        free(def);
+    if (ret < 0)
+    {
+        char *msg = (*Nsort_message)(&sp->nsort_ctx);
+        
+        sp->sort_error = ret;
+        sp->error_code = SP_SORT_DEF_ERROR;
+        if (msg == NULL)
+            msg = "No Nsort error message";
+        strncpy(sp->error_buf, msg, sp->error_buf_size);
+        sp->error_buf[sp->error_buf_size - 1] = '\0';  /* handle overflow */
+        sp->sort_state = SORT_DONE;
+        return (SP_SORT_DEF_ERROR);
+    }
+    sp->sort_state = SORT_INPUT;
+    pthread_mutex_init(&sp->sump_mtx, NULL);
+    /* use output ready cond for state changes */
+    pthread_cond_init(&sp->task_output_ready_cond, NULL);
+    sp->sort_temp_buf_size = sp->out[0].buf_size ? sp->out[0].buf_size : 4096;
+    if ((sp->sort_temp_buf = (char *)malloc(sp->sort_temp_buf_size)) == NULL)
+        return (SP_MEM_ALLOC_ERROR);
+    return (SP_OK);
+}
+
+
+/* sp_get_sort_stats - get a string containing the nsort statistics report
+ *                     for an nsort sump pump that has completed.
+ */
+const char *sp_get_sort_stats(sp_t sp)
+{
+    const char  *ret;
+    
+    if (sp->error_code)
+        return ("no stats because of nsort error");
+
+    if (!(sp->flags & SP_SORT))
+        return (NULL);
+    if ((ret = (*Nsort_get_stats)(&sp->nsort_ctx)) == NULL)
+        ret = "Nsort_get_stats() failure\n";
+    return (ret);
+}
+
+#else
+
+/* sp_start_sort - dummy non-sort version.
+ */
+int sp_start_sort(sp_t *caller_sp,
+                  unsigned flags,
+                  char *def_fmt,
+                  ...)
+{
+    *caller_sp = NULL;
+    return (SP_SORT_NOT_COMPILED);
+}
+
+
+/* sp_get_sort_stats - dummy non-sort version.
+ */
+const char *sp_get_sort_stats(sp_t sp)
+{
+    return ("");
+}
+
+
+#endif /* !defined(SUMP_PUMP_NO_SORT) */
 
 
 /* file_reader_test - main routine for a file reader thread using 
@@ -579,6 +781,51 @@ static void *file_reader_buffered(void *arg)
     return (NULL);
 }
 
+
+/* file_writer_buffered - main routine for a file writer thread using normal
+ *                        write() calls.
+ */
+static void *file_writer_buffered(void *arg)
+{
+    char                *buf;
+    ssize_t             size;
+    sp_file_t           sp_dst = (sp_file_t)arg;
+    sp_t                sp = sp_dst->sp;
+    int                 fd = sp_dst->fd;
+    int                 out_index = sp_dst->out_index;
+    char                err_buf[200];
+    
+    TRACE("file_writer_buffered: allocating %d buffer bytes\n", sp_dst->transfer_size);
+    buf = (char *)malloc(sp_dst->transfer_size);
+    
+    for (;;)
+    {
+        size = sp_read_output(sp, out_index, buf, sp_dst->transfer_size);
+        if (size <= 0)
+        {
+            if (size < 0)
+            {
+                sp_dst->error_code = SP_FILE_WRITE_ERROR;
+            }
+            break;
+        }
+        TRACE("writer: writing %d bytes\n", size);  
+        if (write(fd, buf, size) != size)
+        {
+            sp_raise_error(sp, SP_FILE_WRITE_ERROR,
+                           "%s: write() failure: %s\n",
+                           sp_dst->fname,
+                           strerror_r(errno, err_buf, sizeof(err_buf)));
+            sp_dst->error_code = SP_FILE_WRITE_ERROR;
+            break;
+        }
+    }
+    TRACE("file_writer_buffered done: %d\n", sp_dst->error_code);
+    return (NULL);
+}
+
+
+#if defined(AIO_CAPABLE)
 
 /* file_reader_direct - main routine for a file reader thread using direct
  *                      aio_read() calls on sump pump input buffers.
@@ -723,49 +970,6 @@ static void *file_reader_direct(void *arg)
         }
     }
     TRACE("file_reader_direct done: %d\n", sp_src->error_code);
-    return (NULL);
-}
-
-
-/* file_writer_buffered - main routine for a file writer thread using normal
- *                        write() calls.
- */
-static void *file_writer_buffered(void *arg)
-{
-    char                *buf;
-    ssize_t             size;
-    sp_file_t           sp_dst = (sp_file_t)arg;
-    sp_t                sp = sp_dst->sp;
-    int                 fd = sp_dst->fd;
-    int                 out_index = sp_dst->out_index;
-    char                err_buf[200];
-    
-    TRACE("file_writer_buffered: allocating %d buffer bytes\n", sp_dst->transfer_size);
-    buf = (char *)malloc(sp_dst->transfer_size);
-    
-    for (;;)
-    {
-        size = sp_read_output(sp, out_index, buf, sp_dst->transfer_size);
-        if (size <= 0)
-        {
-            if (size < 0)
-            {
-                sp_dst->error_code = SP_FILE_WRITE_ERROR;
-            }
-            break;
-        }
-        TRACE("writer: writing %d bytes\n", size);  
-        if (write(fd, buf, size) != size)
-        {
-            sp_raise_error(sp, SP_FILE_WRITE_ERROR,
-                           "%s: write() failure: %s\n",
-                           sp_dst->fname,
-                           strerror_r(errno, err_buf, sizeof(err_buf)));
-            sp_dst->error_code = SP_FILE_WRITE_ERROR;
-            break;
-        }
-    }
-    TRACE("file_writer_buffered done: %d\n", sp_dst->error_code);
     return (NULL);
 }
 
@@ -961,6 +1165,8 @@ static void *file_writer_direct(void *arg)
     return;
 }
 
+#endif
+
 
 /* sp_wait - can be called by an external thread, e.g. the thread that
  *           called sp_start(), to wait for all sump pump activity to cease.
@@ -1003,7 +1209,8 @@ int sp_wait(sp_t sp)
 }
 
 
-/* syntax error - internal routine to print out an nsort error message
+/* syntax error - internal routine to internally record a syntax error
+ *                message for possible later retrieval.
  */
 static void syntax_error(sp_t sp, char *p, char *err_msg)
 {
@@ -1158,6 +1365,7 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods, unsigned flags)
         get_file_mods(sp_src, comma_char + 1);
     if (sp_src->mode == MODE_UNSPECIFIED)
         sp_src->mode = Default_file_mode;
+#if defined(AIO_CAPABLE)
     if (sp_src->mode == MODE_DIRECT && strcmp(sp_src->fname, "<stdin>") != 0)
     {
         reader_main = file_reader_direct;
@@ -1168,6 +1376,7 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods, unsigned flags)
             sp_src->aio_count = 4;
     }
     else
+#endif
     {
         if (Default_rw_test_size != 0)
         {
@@ -1219,6 +1428,7 @@ sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods, 
         get_file_mods(sp_dst, comma_char + 1);
     if (sp_dst->mode == MODE_UNSPECIFIED)
         sp_dst->mode = Default_file_mode;
+#if defined(AIO_CAPABLE)
     if (sp_dst->mode == MODE_DIRECT &&
         strcmp(sp_dst->fname, "<stdout>") != 0 &&
         strcmp(sp_dst->fname, "<stderr>") != 0)
@@ -1231,6 +1441,7 @@ sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods, 
             sp_dst->aio_count = 4;
     }
     else
+#endif
     {
         writer_main = file_writer_buffered;
         if (Default_rw_test_size != 0)
@@ -1321,29 +1532,6 @@ static void check_task_done(sp_t sp)
         }
     }
     TRACE("check_task_done() returning\n");
-}
-
-
-/* post_nsort_error - internal routine to post an error received from nsort.
- */
-static void post_nsort_error(sp_t sp, unsigned ret)
-{
-    pthread_mutex_lock(&sp->sump_mtx);
-    if (sp->error_code == SP_OK)  /* if no other error yet, this is the one */
-    {
-        char *msg = (*Nsort_message)(&sp->nsort_ctx);
-        
-        sp->error_code = SP_SORT_EXEC_ERROR;
-        sp->sort_error = ret;
-        if (msg == NULL)
-            msg = "No Nsort error message";
-        strncpy(sp->error_buf, msg, sp->error_buf_size);
-        sp->error_buf[sp->error_buf_size - 1] = '\0';  /* handle overflow */
-    }
-    sp->sort_error = ret;
-    sp->sort_state = SORT_DONE;
-    pthread_cond_broadcast(&sp->task_output_ready_cond);
-    pthread_mutex_unlock(&sp->sump_mtx);
 }
 
 
@@ -1732,13 +1920,16 @@ ssize_t sp_write_input(sp_t sp, void *buf, ssize_t size)
              * pumps in upstream-to-downstream order */
             sp->error_code = SP_UPSTREAM_ERROR;
             size = 0;   /* act as if normal eof */
+#if !defined(SUMP_PUMP_NO_SORT)
             if (sp->flags & SP_SORT)
             {
                 (*Nsort_end)(&sp->nsort_ctx);
             }
+#endif
             return (0);  /* caller is indicating error, return OK status */
         }
         /* else size == 0 */
+#if !defined(SUMP_PUMP_NO_SORT)
         if (sp->flags & SP_SORT)
         {
             ret = (*Nsort_release_end)(&sp->nsort_ctx);
@@ -1757,9 +1948,11 @@ ssize_t sp_write_input(sp_t sp, void *buf, ssize_t size)
                 return (0);
             }
         }
+#endif
         /* for non-sort case, fall through */
     }
 
+#if !defined(SUMP_PUMP_NO_SORT)
     if (sp->flags & SP_SORT)
     {
         if (sp->sort_state != SORT_INPUT)
@@ -1769,6 +1962,7 @@ ssize_t sp_write_input(sp_t sp, void *buf, ssize_t size)
             post_nsort_error(sp, ret);
         return (ret == NSORT_SUCCESS ? size : 0);
     }
+#endif
 
     /* if EOF and there isn't a partially filled input buffer needing release.
      */
@@ -1923,7 +2117,7 @@ int pfunc_get_thread_index(sp_task_t t)
  *                           increases with each subsequent task
  *                           issued/started by the sump pump.
  */
-u8 pfunc_get_task_number(sp_task_t t)
+size_t pfunc_get_task_number(sp_task_t t)
 {
     return (t->task_number);
 }
@@ -2574,6 +2768,7 @@ ssize_t sp_read_output(sp_t sp, unsigned index, void *buf, ssize_t size)
     if (sp->error_code)
         return (-1);
 
+#if !defined(SUMP_PUMP_NO_SORT)
     if (sp->flags & SP_SORT)
     {
         int     ret;
@@ -2660,7 +2855,8 @@ ssize_t sp_read_output(sp_t sp, unsigned index, void *buf, ssize_t size)
         }
         return (bytes_returned);
     }
-
+#endif
+    
     if (index >= sp->num_outputs)
         return (-1);
             
@@ -2852,142 +3048,6 @@ int sp_link(sp_t out_sp, unsigned out_index, sp_t in_sp)
         die("sp_start_link: pthread_create() ret: %d\n", ret);
 
     return (SP_OK);
-}
-
-
-#define DIFF_DRCTV      " -diff"
-#define STAT_DRCTV      " -stat"
-
-
-/* sp_start_sort - start an nsort instance with a sump pump wrapper so
- *                 that its input or output can be assigned to a file or
- *                 linked to another sump pump.  For instance, the sort
- *                 input or output can be linked to sump pump performing
- *                 record pumping such as "map" on input and "reduce"
- *                 for output.
- * Parameters:
- *      sp -       Pointer to where to return newly allocated sp_t 
- *                 identifier that will be used in as the first
- *                 argument to all subsequent sp_*() calls.
- *      flags -    Unsigned int with the following possible values:
- *                   SP_KEY_DIFF     Output records should be preceded
- *                                   by a single byte that indicates how
- *                                   many keys in this record are the
- *                                   same as in the previous record.
- *      def -      Nsort sort definition string. 
- */
-int sp_start_sort(sp_t *caller_sp,
-                  unsigned flags,
-                  char *def_fmt,
-                  ...)
-{
-    int         ret;
-    char        *def_plus = NULL;
-    sp_t        sp;
-    size_t      def_len;
-    char        *def;
-    char        thread_drctv[30];
-
-    *caller_sp = NULL;  /* assume the worst for now */
-    sp = (sp_t)calloc(1, sizeof(struct sump));
-    if (sp == NULL)
-        return (SP_MEM_ALLOC_ERROR);
-    sp->error_buf_size = ERROR_BUF_SIZE;
-    sp->error_buf = (char *)calloc(1, sp->error_buf_size);
-    if (sp->error_buf == NULL)
-        return (SP_MEM_ALLOC_ERROR);
-    *caller_sp = sp;  /* allow access to error_buf even if failure */
-    /* fill in default parameters */
-    sp->num_threads = sysconf(_SC_NPROCESSORS_ONLN);
-    sprintf(thread_drctv, "-process=%d ", sp->num_threads);
-    if (sp->num_outputs > 32)
-        sp->num_outputs = 32;
-    sp->num_outputs = 1;
-    sp->out = (struct sump_out *)calloc(1, sizeof(struct sump_out));
-    sp->delimiter = (void *)"\n";
-    sp->rec_size = 0;
-
-    if (link_in_nsort() != 0)    /* if error */
-    {
-        sp->error_code = SP_NSORT_LINK_FAILURE;
-        sp->sort_state = SORT_DONE;
-        return (sp->error_code);
-    }
-    
-    sp->flags = flags;
-    sp->flags |= SP_SORT;
-
-    if (def_fmt != NULL)
-    {
-        va_list ap;
-        size_t  def_len;
-        
-        va_start(ap, def_fmt);
-        def_len = vsnprintf(NULL, 0, def_fmt, ap);
-        def = (char *)calloc(def_len + 1, 1);
-        va_start(ap, def_fmt);
-        if (vsnprintf(def, def_len + 1, def_fmt, ap) != def_len)
-            die("sp_start_sort: vnsprintf failed to return %d\n", def_len);
-    }
-    else
-        def = "";
-
-    def_len = strlen(def) + 1;  /* plus '\0' */
-    def_len += strlen(STAT_DRCTV);
-    if (flags & SP_KEY_DIFF)  /* if appending " -diff" directive */
-        def_len += strlen(DIFF_DRCTV);
-    def_len += strlen(thread_drctv);
-    def_plus = (char *)malloc(def_len);
-    if (def_plus == NULL)
-        return (SP_MEM_ALLOC_ERROR);
-    strcpy(def_plus, thread_drctv); /* goes first so caller can override */
-    strcat(def_plus, def);
-    strcat(def_plus, STAT_DRCTV);
-    if (flags & SP_KEY_DIFF)
-        strcat(def_plus, DIFF_DRCTV);
-    ret = (*Nsort_define)(def_plus, 0, NULL, &sp->nsort_ctx);
-    free(def_plus);
-    if (def_fmt != NULL)
-        free(def);
-    if (ret < 0)
-    {
-        char *msg = (*Nsort_message)(&sp->nsort_ctx);
-        
-        sp->sort_error = ret;
-        sp->error_code = SP_SORT_DEF_ERROR;
-        if (msg == NULL)
-            msg = "No Nsort error message";
-        strncpy(sp->error_buf, msg, sp->error_buf_size);
-        sp->error_buf[sp->error_buf_size - 1] = '\0';  /* handle overflow */
-        sp->sort_state = SORT_DONE;
-        return (SP_SORT_DEF_ERROR);
-    }
-    sp->sort_state = SORT_INPUT;
-    pthread_mutex_init(&sp->sump_mtx, NULL);
-    /* use output ready cond for state changes */
-    pthread_cond_init(&sp->task_output_ready_cond, NULL);
-    sp->sort_temp_buf_size = sp->out[0].buf_size ? sp->out[0].buf_size : 4096;
-    if ((sp->sort_temp_buf = (char *)malloc(sp->sort_temp_buf_size)) == NULL)
-        return (SP_MEM_ALLOC_ERROR);
-    return (SP_OK);
-}
-
-
-/* sp_get_sort_stats - get a string containing the nsort statistics report
- *                     for an nsort sump pump that has completed.
- */
-const char *sp_get_sort_stats(sp_t sp)
-{
-    const char  *ret;
-    
-    if (sp->error_code)
-        return ("no stats because of nsort error");
-
-    if (!(sp->flags & SP_SORT))
-        return (NULL);
-    if ((ret = (*Nsort_get_stats)(&sp->nsort_ctx)) == NULL)
-        ret = "Nsort_get_stats() failure\n";
-    return (ret);
 }
 
 
@@ -3519,6 +3579,12 @@ const char *sp_get_error_string(sp_t sp, int error_code)
         err_code_str =
             "SP_NSORT_LINK_FAILURE: link attempt to nsort library failed. "
             "Is nsort installed?";
+        break;
+
+      case SP_SORT_NOT_COMPILED:
+        err_code_str =
+            "SP_SORT_NOT_COMPILED: sump.c has not been compiled to support "
+            "sorting";
         break;
 
       case SP_PUMP_FUNCTION_ERROR:
