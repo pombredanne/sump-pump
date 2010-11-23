@@ -403,6 +403,9 @@ void pfunc_mutex_unlock(sp_task_t t);
 /* SP_NSORT_LINK_FAILURE - link attempt to nsort library failed */
 #define SP_NSORT_LINK_FAILURE   (-16)
 
+/* SP_SORT_NOT_COMPILED - sump pump was compiled without sort support */
+#define SP_SORT_NOT_COMPILED    (-17)
+
 #define SP_PUMP_FUNCTION_ERROR (-1000)
 
 

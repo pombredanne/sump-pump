@@ -101,70 +101,78 @@ int main(int argc, char *argv[])
     ret = sp_start_sort(&sp,
                         0,
                         "-license=\"\" ");
-    if (ret != SP_SORT_DEF_ERROR)
+    if (ret == SP_NSORT_LINK_FAILURE)
     {
-        fprintf(stderr, "return status from sp_start_sort() with a licensing"
-                " error is not SP_SORT_DEF_ERROR: %d\n", ret);
-        return (1);
-    }
-    error_str = sp_get_error_string(sp, ret);
-    if (strstr(error_str, "New license info for") == NULL)
-    {
-        fprintf(stderr, "licensing failure error string does not include "
-                "new license info:\n%s\n", error_str);
-        return (1);
-    }
-    
-    /* force record max size exceeded error that will occur either on the EOF
-     * or on the first sp_read_output() call.
-     */
-    def = "-format:max=10 -memory:20m";
-    ret = sp_start_sort(&sp, 0, def);
-    longlinelen = strlen(longline);
-    if (ret != SP_OK)
-    {
-        fprintf(stderr, "return status from sp_start_sort(&sp, 0 \"%s\") "
-                "is not SP_OK: %d\n", def, ret);
-        return (1);
-    }
-    ret = sp_write_input(sp, longline, longlinelen);
-    if (ret != longlinelen)
-    {
-        fprintf(stderr, "return status from sp_write_input() "
-                "is not longlinelen(%d): %d\n", longlinelen, ret);
-        return (1);
-    }
-    ret = sp_write_input(sp, NULL, 0);
-    if (ret != 0)
-    {
-        if (ret > 0)
-        {
-            fprintf(stderr, "return status from sp_write_input(0) "
-                    "is not 0: %d\n", ret);
-            return (1);
-        }
+        fprintf(stderr, "Warning: Nsort library cannot be linked to.  "
+                "Skipping one-shot sort tests.\n");
     }
     else
     {
-        ret = sp_read_output(sp, 0, buf, sizeof(buf));
-        if (ret >= 0)
+        if (ret != SP_SORT_DEF_ERROR)
         {
-            fprintf(stderr, "return status from sp_read_output() "
-                    "is non-negative %d\n", ret);
+            fprintf(stderr, "return status from sp_start_sort() with a"
+                    " licensing error is not SP_SORT_DEF_ERROR: %d\n", ret);
             return (1);
         }
+        error_str = sp_get_error_string(sp, ret);
+        if (strstr(error_str, "New license info for") == NULL)
+        {
+            fprintf(stderr, "licensing failure error string does not include "
+                    "new license info:\n%s\n", error_str);
+            return (1);
+        }
+    
+        /* force record max size exceeded error that will occur either on the 
+         * EOF or on the first sp_read_output() call.
+         */
+        def = "-format:max=10 -memory:20m";
+        ret = sp_start_sort(&sp, 0, def);
+        longlinelen = strlen(longline);
+        if (ret != SP_OK)
+        {
+            fprintf(stderr, "return status from sp_start_sort(&sp, 0 \"%s\") "
+                    "is not SP_OK: %d\n", def, ret);
+            return (1);
+        }
+        ret = sp_write_input(sp, longline, longlinelen);
+        if (ret != longlinelen)
+        {
+            fprintf(stderr, "return status from sp_write_input() "
+                    "is not longlinelen(%d): %d\n", longlinelen, ret);
+            return (1);
+        }
+        ret = sp_write_input(sp, NULL, 0);
+        if (ret != 0)
+        {
+            if (ret > 0)
+            {
+                fprintf(stderr, "return status from sp_write_input(0) "
+                        "is not 0: %d\n", ret);
+                return (1);
+            }
+        }
+        else
+        {
+            ret = sp_read_output(sp, 0, buf, sizeof(buf));
+            if (ret >= 0)
+            {
+                fprintf(stderr, "return status from sp_read_output() "
+                        "is non-negative %d\n", ret);
+                return (1);
+            }
+        }
+        error_str = sp_get_error_string(sp, sp_get_error(sp));
+        if (strstr(error_str, "DELIM_MISSING") == NULL)
+        {
+            fprintf(stderr, "Too-long line failure error string does not "
+                    "include \"DELIM_MISSING\":\n%s\n", error_str);
+            return (1);
+        }
+        
+        /* force licensing failure for hitting free licensing capacity limit.
+         * XXX
+         */
     }
-    error_str = sp_get_error_string(sp, sp_get_error(sp));
-    if (strstr(error_str, "DELIM_MISSING") == NULL)
-    {
-        fprintf(stderr, "Too-long line failure error string does not include "
-                "\"DELIM_MISSING\":\n%s\n", error_str);
-        return (1);
-    }
-
-    /* force licensing failure for hitting free licensing capacity limit.
-     * XXX
-     */
 
     return (0);
 }

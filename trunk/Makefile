@@ -20,7 +20,7 @@ PERF_FILES=lookupref.txt lookupin.txt spgzipinput billing_input.txt \
 LIB=libsump.so.1
 
 $(LIB): sump.o
-	gcc -o $(LIB) -m64 -fPIC -shared -Xlinker -Map -Xlinker mapfile.sump \
+	gcc -o $(LIB) -shared \
 	-Xlinker --version-script=exports.linux sump.o -lpthread -ldl -lrt
 
 all: $(LIB) reg perf
