@@ -80,11 +80,25 @@ typedef int nsort_msg_t;	/* return status & error message numbers */
 # include "nsorterrno.h"
 #endif
 
+/* values for the flags sump pump structure member
+ */
+#define SP_UNICODE                      0x0001  /* not yet supported */
+#define SP_UTF_8                        0x0002  /* input records are utf-8
+                                                 * characters */
+#define SP_ASCII   SP_UTF_8
+#define SP_FIXED                        0x0003  /* input records are a fixed
+                                                 * number of bytes */
+#define SP_WHOLE_BUF                    0x0004  /* there are no input records,
+                                                 * instead there is only an
+                                                 * input buffer */
+#define SP_REC_TYPE_MASK                0x0007
+#define SP_SORT                         0x0008
+#define SP_GROUP_BY                     0x0010
+
+#define REC_TYPE(sp) ((sp)->flags & SP_REC_TYPE_MASK)
+
 #define TRUE 1
 #define FALSE 0
-#define REC_TYPE(sp) ((sp)->flags & SP_REC_TYPE_MASK)
-#define SP_SORT SP_RESERVED_1
-#define SP_REDUCE_BY_KEYS SP_RESERVED_2
 
 /* sort_state values */
 #define SORT_INPUT      1
@@ -113,8 +127,6 @@ struct sump
                                         * pump func */
     int                 num_in_bufs;   /* number of input buffers */
     int                 num_outputs;   /* number of sump pump output channels*/
-    int                 group_by_keys; /* number of keys to group/reduce
-                                        * records by */
     ssize_t             in_buf_size;   /* input buffer size in bytes */
     struct sump_out     *out;          /* array of output structures, one for
                                         * each output */
@@ -153,9 +165,9 @@ struct sump
                                           * their readers */
     u8                  cnt_task_init;  /* number of tasks initialized and
                                          * available for the taking by any
-                                         * member thread */
+                                         * sump pump thread */
     u8                  cnt_task_begun; /* number of tasks allocated/taken
-                                         * and begun by member threads */
+                                         * and begun by sump pump threads */
     u8                  cnt_task_drained; /* number of tasks that have
                                            * been completed and had all
                                            * their output buffer(s)
@@ -179,6 +191,8 @@ struct sump
     char                broken_input;   /* sp_write_input() called with
                                          * a negative size */
     char                sort_state;     /* only used for sorting */
+    char                match_keys;     /* only used for sorting - indicates
+                                         * -match has been specified */
     const char          *in_file;       /* input file str or NULL if none */
     struct sp_file      *in_file_sp;    /* input file of sump pump */
 };
@@ -480,6 +494,7 @@ nsort_msg_t (*Nsort_return_recs)(void *buf,
 nsort_msg_t (*Nsort_end)(nsort_t *ctxp);
 const char *(*Nsort_get_stats)(nsort_t *ctxp);
 char *(*Nsort_message)(nsort_t *ctxp);
+char *(*Nsort_version)(void);
 
 
 /* get_nsort_syms - internal routine to dynamically link to nsort library
@@ -503,6 +518,8 @@ static int get_nsort_syms()
     if ((Nsort_get_stats = dlsym(syms, "nsort_get_stats")) == NULL)
         return (-2);
     if ((Nsort_message = dlsym(syms, "nsort_message")) == NULL)
+        return (-2);
+    if ((Nsort_version = dlsym(syms, "nsort_version")) == NULL)
         return (-2);
     return (0);
 }
@@ -545,7 +562,6 @@ static void post_nsort_error(sp_t sp, unsigned ret)
 }
 
 
-#define DIFF_DRCTV      " -diff"
 #define STAT_DRCTV      " -stat"
 
 
@@ -559,15 +575,17 @@ static void post_nsort_error(sp_t sp, unsigned ret)
  *      sp -       Pointer to where to return newly allocated sp_t 
  *                 identifier that will be used in as the first
  *                 argument to all subsequent sp_*() calls.
- *      flags -    Unsigned int with the following possible values:
- *                   SP_KEY_DIFF     Output records should be preceded
- *                                   by a single byte that indicates how
- *                                   many keys in this record are the
- *                                   same as in the previous record.
- *      def -      Nsort sort definition string. 
+ *      def -      Nsort sort definition string.  Besides the Nsort 
+ *                 commands listed in the Nsort User Guide, the following
+ *                 directives are also recognized:
+ *                   -match[=%d] Each output record will be preceded by a
+ *                               single byte that indicates the
+ *                               specified number of keys in this record
+ *                               are the same as in the previous record.
+ *                               If no key number is specified, all keys
+ *                               are examined for a match condition.
  */
 int sp_start_sort(sp_t *caller_sp,
-                  unsigned flags,
                   char *def_fmt,
                   ...)
 {
@@ -577,6 +595,7 @@ int sp_start_sort(sp_t *caller_sp,
     size_t      def_len;
     char        *def;
     char        thread_drctv[30];
+    char        *p;
 
     *caller_sp = NULL;  /* assume the worst for now */
     sp = (sp_t)calloc(1, sizeof(struct sump));
@@ -589,7 +608,7 @@ int sp_start_sort(sp_t *caller_sp,
     *caller_sp = sp;  /* allow access to error_buf even if failure */
     /* fill in default parameters */
     sp->num_threads = sysconf(_SC_NPROCESSORS_ONLN);
-    sprintf(thread_drctv, "-process=%d ", sp->num_threads);
+    sprintf(thread_drctv, "-threads=%d ", sp->num_threads);
     if (sp->num_outputs > 32)
         sp->num_outputs = 32;
     sp->num_outputs = 1;
@@ -604,7 +623,6 @@ int sp_start_sort(sp_t *caller_sp,
         return (sp->error_code);
     }
     
-    sp->flags = flags;
     sp->flags |= SP_SORT;
 
     if (def_fmt != NULL)
@@ -624,8 +642,6 @@ int sp_start_sort(sp_t *caller_sp,
 
     def_len = strlen(def) + 1;  /* plus '\0' */
     def_len += strlen(STAT_DRCTV);
-    if (flags & SP_KEY_DIFF)  /* if appending " -diff" directive */
-        def_len += strlen(DIFF_DRCTV);
     def_len += strlen(thread_drctv);
     def_plus = (char *)malloc(def_len);
     if (def_plus == NULL)
@@ -633,8 +649,41 @@ int sp_start_sort(sp_t *caller_sp,
     strcpy(def_plus, thread_drctv); /* goes first so caller can override */
     strcat(def_plus, def);
     strcat(def_plus, STAT_DRCTV);
-    if (flags & SP_KEY_DIFF)
-        strcat(def_plus, DIFF_DRCTV);
+
+    /* check for input file declaration */
+    for (p = def_plus; *p != '\0'; p++)
+    {
+        if (p[0] == '-' || p[0] == '/')
+        {
+            p++;
+            /* detect -IN[_]F[ILE] */
+            if (toupper(p[0]) == 'I' && toupper(p[1]) == 'N' &&
+                (toupper(p[2]) == 'F' || p[2] == '_'))
+            {
+                sp->in_file = "<defined to nsort>";
+                p += 3;
+            }
+            /* detect -OUT[_]F[ILE] */
+            else if (toupper(p[0]) == 'O' && toupper(p[1]) == 'U' &&
+                     toupper(p[2]) == 'T' &&
+                     (toupper(p[3]) == 'F' || p[3] == '_'))
+            {
+                sp->out[0].file = "<defined to nsort>";
+                p += 4;
+            }
+            /* detect -MATCH */
+            else if (toupper(p[0]) == 'M' && toupper(p[1]) == 'A' &&
+                     toupper(p[2]) == 'T' && toupper(p[3]) == 'C' &&
+                     toupper(p[4]) == 'H')
+            {
+                sp->match_keys = TRUE;
+                p += 5;
+            }
+        }
+    }
+
+    /* check for output file declaration */
+    
     ret = (*Nsort_define)(def_plus, 0, NULL, &sp->nsort_ctx);
     free(def_plus);
     if (def_fmt != NULL)
@@ -652,7 +701,7 @@ int sp_start_sort(sp_t *caller_sp,
         sp->sort_state = SORT_DONE;
         return (SP_SORT_DEF_ERROR);
     }
-    sp->sort_state = SORT_INPUT;
+    sp->sort_state = sp->in_file != NULL ? SORT_OUTPUT : SORT_INPUT;
     pthread_mutex_init(&sp->sump_mtx, NULL);
     /* use output ready cond for state changes */
     pthread_cond_init(&sp->task_output_ready_cond, NULL);
@@ -680,12 +729,23 @@ const char *sp_get_sort_stats(sp_t sp)
     return (ret);
 }
 
+
+/* sp_get_nsort_version - get the subversion version for sump pump
+ */
+const char *sp_get_nsort_version(void)
+{
+    if (link_in_nsort() != 0)    /* if error */
+    {
+        return ("Nsort could not be linked in");
+    }
+    return ((*Nsort_version)());
+}
+
 #else
 
 /* sp_start_sort - dummy non-sort version.
  */
 int sp_start_sort(sp_t *caller_sp,
-                  unsigned flags,
                   char *def_fmt,
                   ...)
 {
@@ -699,6 +759,14 @@ int sp_start_sort(sp_t *caller_sp,
 const char *sp_get_sort_stats(sp_t sp)
 {
     return ("");
+}
+
+
+/* sp_get_nsort_version - dummy non-sort version.
+ */
+const char *sp_get_nsort_version(void)
+{
+    return ("this SUMP Pump version has not been compiled for nsort");
 }
 
 
@@ -1178,6 +1246,20 @@ int sp_wait(sp_t sp)
 
     if (sp->flags & SP_SORT)
     {
+#if !defined(SUMP_PUMP_NO_SORT)
+        /* if the sort output is going to a file, and we haven't yet
+         * waited for it to complete.
+         */
+        if (sp->sort_state == SORT_OUTPUT && sp->out[0].file != NULL)
+        {
+            size_t  zero = 0;
+            
+            ret = (*Nsort_return_recs)(NULL, &zero, &sp->nsort_ctx);
+            if (ret != NSORT_END_OF_OUTPUT)
+                post_nsort_error(sp, ret);
+            sp->sort_state = SORT_DONE;
+        }
+#endif
         pthread_mutex_lock(&sp->sump_mtx);
         while (sp->error_code == 0 && sp->sort_state != SORT_DONE)
         {
@@ -1620,9 +1702,8 @@ static void flush_in_buf(sp_t sp, size_t buf_bytes, int eof)
     char                *curr_rec;
     char                *p;
     int                 i;
-    int                 key_offset;
         
-    /* get ready to release in_buf to member threads executing pump funcs */
+    /* get ready to release in_buf to pump threads executing pump funcs */
     /* initially, no readers (there will be at least one) */
     ib = &sp->in_buf[sp->cnt_in_buf_readable % sp->num_in_bufs];
     ib->num_readers = 0;     
@@ -1638,9 +1719,9 @@ static void flush_in_buf(sp_t sp, size_t buf_bytes, int eof)
     {
         /* if we are grouping record by key values
          */
-        if (sp->flags & SP_REDUCE_BY_KEYS)
+        if (sp->flags & SP_GROUP_BY)
         {
-            /* the member thread performing the most previously
+            /* the pump thread performing the most previously
              * issued task will always read this input buffer in
              * order to find the end of its input
              */
@@ -1661,12 +1742,11 @@ static void flush_in_buf(sp_t sp, size_t buf_bytes, int eof)
                     if (curr_rec != ib->in_buf ||
                         sp->prev_in_buf_ending_rec_partial_bytes == 0)
                     {
-                        /* if key offset indicates a new key
+                        /* if match character indicates a new key
                          * grouping, then stop as this the boundry
                          * point between tasks.
                          */
-                        key_offset = *curr_rec - '0';
-                        if (key_offset < sp->group_by_keys)
+                        if (*curr_rec == '0')
                             break;
                     }
                     /* find next instance of newline in buffer, if any */
@@ -1686,14 +1766,13 @@ static void flush_in_buf(sp_t sp, size_t buf_bytes, int eof)
                 if (sp->prev_in_buf_ending_rec_partial_bytes == 0)
                     curr_rec = ib->in_buf;
                 else
-                    curr_rec = ib->in_buf + sp->rec_size -
+                    curr_rec = ib->in_buf + (sp->rec_size + 1) -
                         sp->prev_in_buf_ending_rec_partial_bytes;
                 while (curr_rec < ib->in_buf + ib->in_buf_bytes)
                 {
-                    key_offset = *curr_rec - '0';
-                    if (key_offset < sp->group_by_keys)
+                    if (*curr_rec == '0')
                         break;
-                    curr_rec += sp->rec_size;
+                    curr_rec += sp->rec_size + 1;
                 }
                 break;
             }
@@ -1701,7 +1780,7 @@ static void flush_in_buf(sp_t sp, size_t buf_bytes, int eof)
         else   /* we are not grouping records by key value */
         {
             /* if this in buffer starts with a partial record, then
-             * the member thread performing the previous issued task
+             * the pump thread performing the previous issued task
              * will read this buffer in order to find the end of its
              * input
              */
@@ -1757,7 +1836,7 @@ static void flush_in_buf(sp_t sp, size_t buf_bytes, int eof)
       case SP_FIXED:
         sp->prev_in_buf_ending_rec_partial_bytes =
             (sp->prev_in_buf_ending_rec_partial_bytes + ib->in_buf_bytes) %
-            sp->rec_size;
+            (sp->rec_size + ((sp->flags & SP_GROUP_BY) ? 1 : 0));
         break;
 
       case SP_WHOLE_BUF:
@@ -2194,7 +2273,7 @@ void pfunc_mutex_unlock(sp_task_t t)
 
 /* done_reading_in_buf - internal routine to mark the task's current
  *                       input buffer as done for reading.  This is
- *                       non-trivial because multiple member threads may
+ *                       non-trivial because multiple pump threads may
  *                       have to read the same input buffer.
  */
 static void done_reading_in_buf(sp_task_t t, int move_to_next_in_buf)
@@ -2288,11 +2367,11 @@ static int is_more_input(sp_task_t t)
     /* if we are past the first input buffer for this task (because we
      * had to read the remainder of the last task record at the
      * beginning of the second input buffer), then we have hit the end
-     * of this task's input.  Note that if REDUCE_BY_KEYS is specified,
+     * of this task's input.  Note that if GROUP_BY is specified,
      * then the task pump function can read past any record remainder
      * at the beginning of the second input buffer.
      */
-    if (!t->first_in_buf && !(t->sp->flags & SP_REDUCE_BY_KEYS))
+    if (!t->first_in_buf && !(t->sp->flags & SP_GROUP_BY))
     {
         done_reading_in_buf(t, t->curr_rec == t->in_buf + t->in_buf_bytes);
         t->input_eof = TRUE;
@@ -2313,7 +2392,7 @@ static int is_more_input(sp_task_t t)
     /* if we are not grouping by key difference, then we have hit the
      * end of this task's input.
      */
-    if (!(t->sp->flags & SP_REDUCE_BY_KEYS))
+    if (!(t->sp->flags & SP_GROUP_BY))
     {
         t->input_eof = TRUE;
         return (0);
@@ -2333,7 +2412,7 @@ size_t pfunc_get_rec(sp_task_t t, void *ptr_to_rec_ptr)
     void        *buf;
     char        *rec;
     char        *next_rec;
-    int         key_offset;
+    int         match_char;
     size_t      len;
     size_t      src_size;
     size_t      trans_size;
@@ -2360,7 +2439,7 @@ size_t pfunc_get_rec(sp_task_t t, void *ptr_to_rec_ptr)
         /* if we are not grouping records then return no record (0) since
          * we are on a record boundry.
          */
-        if (!(sp->flags & SP_REDUCE_BY_KEYS))
+        if (!(sp->flags & SP_GROUP_BY))
         {
             t->input_eof = TRUE;
             return 0;
@@ -2374,30 +2453,30 @@ size_t pfunc_get_rec(sp_task_t t, void *ptr_to_rec_ptr)
     /* now we have at least a partial record in the input buffer */
     rec = t->curr_rec;
     /* if there is an initial key offset character */
-    if (sp->flags & SP_REDUCE_BY_KEYS)
+    if (sp->flags & SP_GROUP_BY)
     {
-        key_offset = rec[0] - '0';
+        match_char = rec[0];
         rec++;
         new_key_group_beginning =
-            (key_offset < sp->group_by_keys && !t->first_group_rec);
+            (match_char == '0' && !t->first_group_rec);
     }
 
     /* if the key offset indicates this is the beginning of a new key group &&
      * this is not the actual first record for this current key group.
      */
-    if (!(sp->flags & SP_REDUCE_BY_KEYS) || new_key_group_beginning)
+    if (!(sp->flags & SP_GROUP_BY) || new_key_group_beginning)
     {
         /* if we are beyond the first input buffer for this task, this
          * rec is not only the beginning of the next key group, it also
-         * means we have reached the end of the input for this member
+         * means we have reached the end of the input for this sump pump
          * task.
          */
         if (!t->first_in_buf)
         {
             done_reading_in_buf(t, FALSE);
-            TRACE("pump%d: eof: key_offset: %d at ib %d, curr_rec %08x\n",
+            TRACE("pump%d: eof: match: %c at ib %d, curr_rec %08x\n",
                   t->thread_index,
-                  (sp->flags & SP_REDUCE_BY_KEYS) ? key_offset : 0,
+                  (sp->flags & SP_GROUP_BY) ? match_char : '0',
                   t->curr_in_buf_index, t->curr_rec);
             t->input_eof = TRUE;   /* no need to be inside the mutex because
                                      * only the current thread reads this */
@@ -2627,7 +2706,7 @@ int pfunc_error(sp_task_t t, const char *fmt, ...)
 }
 
 
-/* pump_thread_main - the internal "main" routine of a sump pump member thread.
+/* pump_thread_main - the internal "main" routine of a sump pump thread.
  */
 static void *pump_thread_main(void *arg)
 {
@@ -2666,17 +2745,17 @@ static void *pump_thread_main(void *arg)
         t->thread_index = thread_index;
         pthread_mutex_unlock(&sp->sump_mtx);
 
-        TRACE("pump%d: calling member func with  %d input bytes\n",
+        TRACE("pump%d: calling pump func with  %d input bytes\n",
               thread_index, size);
 #if 0
         if (ExtraProcess)
         {
-            /* Notifiy member process that it has a task to perform */
+            /* Notifiy sump pump process that it has a task to perform */
             sem_post(...);
 
             for (;;)
             {
-                /* Wait for member process to complete or stall */
+                /* Wait for sump pump process to complete or stall */
                 sem_wait(...);
 
                 if (complete)
@@ -2688,7 +2767,7 @@ static void *pump_thread_main(void *arg)
                 /* wait for writer */
                 ;
 
-                /* notify member process that it can proceed */
+                /* notify sump pump process that it can proceed */
                 sem_post(...);
             }
         }
@@ -2697,9 +2776,9 @@ static void *pump_thread_main(void *arg)
         {
             if (REC_TYPE(sp) == SP_WHOLE_BUF)
             {
-                TRACE("pump%d: calling member func() block\n", thread_index);
+                TRACE("pump%d: calling pump func() block\n", thread_index);
                 ret = (*sp->pump_func)(t, sp->pump_arg);
-                TRACE("pump%d: member func returned %d\n", thread_index, ret);
+                TRACE("pump%d: pump func returned %d\n", thread_index, ret);
                 if (ret)
                 {
                     if (t->error_code == 0)
@@ -2715,11 +2794,11 @@ static void *pump_thread_main(void *arg)
             {
                 while (is_more_input(t) && t->error_code == 0)
                 {
-                    TRACE("pump%d: calling member func()\n", thread_index);
+                    TRACE("pump%d: calling pump func()\n", thread_index);
                     /* indicate first record in key group not yet read */
                     t->first_group_rec = TRUE;
                     ret = (*sp->pump_func)(t, sp->pump_arg);
-                    TRACE("pump%d: member func returned %d, input_eof: %d\n",
+                    TRACE("pump%d: pump func returned %d, input_eof: %d\n",
                           thread_index, ret, t->input_eof);
                     if (ret && t->error_code == 0)
                         t->error_code = ret;
@@ -2882,7 +2961,7 @@ ssize_t sp_read_output(sp_t sp, unsigned index, void *buf, ssize_t size)
              *          a) EOF on input has been reached
              *          b) all initialized tasks have begun (been taken), and
              *          c) all taken tasks have had their output read, and
-             * and   3) it's not the case oldest member task is either
+             * and   3) it's not the case oldest sump pump task is either
              *          done or stalled
              */
             while (sp->error_code == 0 &&
@@ -3027,16 +3106,14 @@ int sp_link(sp_t out_sp, unsigned out_index, sp_t in_sp)
 {
     struct sp_link      *sp_link;
     int                 ret;
-    int                 key_diff_output;
-    int                 reduce_by_input;
+    int                 group_by_input;
 
     sp_link = (struct sp_link *)calloc(1, sizeof(struct sp_link));
     if (sp_link == NULL)
         return (SP_MEM_ALLOC_ERROR);
-    key_diff_output = (out_sp->flags & SP_KEY_DIFF) ? 1 : 0;
-    reduce_by_input = (in_sp->flags & SP_REDUCE_BY_KEYS) ? 1 : 0;
-    if (key_diff_output ^ reduce_by_input)
-        return (SP_REDUCE_BY_MISMATCH);
+    group_by_input = (in_sp->flags & SP_GROUP_BY) ? TRUE : FALSE;
+    if (out_sp->match_keys ^ group_by_input)
+        return (SP_GROUP_BY_MISMATCH);
     sp_link->out_sp = out_sp;
     sp_link->out_index = out_index;
     sp_link->in_sp = in_sp;
@@ -3141,23 +3218,19 @@ const char *sp_argv_to_str(char *argv[], int argc)
  *      sp -          Pointer to where to return newly allocated sp_t 
  *                    identifier that will be used in as the first argument
  *                    to all subsequent sp_*() calls.
- *      pump_func - Pointer to pump function that will be called by
+ *      pump_func -   Pointer to pump function that will be called by
  *                    multiple sump pump threads at once.
- *      flags -       Unsigned int with the following possible values:
- *                    SP_UTF_8        Records consist of utf-8 characters with
- *                                    newline as the record delimiter
- *                    SP_ASCII        Same as SP_UTF_8
- *                    SP_FIXED        Input records are a fixed number of bytes
- *                    SP_WHOLE_BUF    There are no input records, instead 
- *                                    there is only an input buffer
  *      arg_fmt -     Printf-format-like string that can be used with
  *                    subsequent arguments as follows:
- *                    REDUCE_BY_KEYS=%d   Group input records by the given
+ *                    ASCII or UTF_8      Input records are ascii/utf-8 
+ *                                        characters delimited by a newline
+ *                                        character.
+ *                    GROUP_BY            Group input records by the given
  *                                        number of keys for the purpose of
  *                                        reducing them.  The sump pump input
  *                                        should be coming from an nsort
- *                                        instance where the SP_KEY_DIFF
- *                                        flag has been set.
+ *                                        instance where the "-match"
+ *                                        directive has been declared.
  *                    IN_FILE=%s          Input file name for the sump pump
  *                                        input.  if not specified, the input
  *                                        should be written into the sump pump
@@ -3180,13 +3253,19 @@ const char *sp_argv_to_str(char *argv[], int argc)
  *                                        the output should be read either
  *                                        by calls to sp_read_output() or by
  *                                        sp_start_link().
- *                    REC_SIZE=%d         Defines the record size in bytes
- *                                        when the SP_FIXED flag is used
+ *                    REC_SIZE=%d         Defines the input record size in 
+ *                                        bytes. The record contents need not 
+ *                                        be ascii nor delimited by a newline
+ *                                        character.
+ *                    WHOLE_BUF           Processing is not done by input
+ *                                        records so not input record type
+ *                                        should be defined.  Instead,
+ *                                        processing is done by whole input
+ *                                        buffers.
  *      ...           potential subsequent arguments to prior arg_fmt
  */
 int sp_start(sp_t *caller_sp,
              sp_pump_t pump_func,
-             unsigned flags,
              char *arg_fmt,
              ...)
 {
@@ -3242,40 +3321,6 @@ int sp_start(sp_t *caller_sp,
     sp->rec_size = 0;
 
     sp->pump_func = pump_func;
-    sp->flags = flags;
-    if (REC_TYPE(sp) == 0)
-    {
-        start_error(sp, "sp_start: a record type must be specified\n");
-        return (sp->error_code);
-    }
-    if (REC_TYPE(sp) == SP_UTF_8)
-    {
-        if (strlen((char *)sp->delimiter) > 1)
-        {
-            start_error(sp, "sp_start: "
-                        "currently only single-char delimiters are allowed\n");
-            return (sp->error_code);
-        }
-    }
-    else if (REC_TYPE(sp) == SP_UNICODE)
-    {
-        start_error(sp,
-                    "sp_start: unicode records are currently not supported\n");
-        return (sp->error_code);
-    }
-    else if (REC_TYPE(sp) == SP_FIXED)
-    {
-        /* nothing for now */
-    }
-    else if (REC_TYPE(sp) == SP_WHOLE_BUF)
-    {
-        /* nothing for now */
-    }
-    else
-    {
-        start_error(sp, "sp_start: multiple record types specified\n");
-        return (sp->error_code);
-    }
 
     if (arg_fmt != NULL)
     {
@@ -3302,6 +3347,12 @@ int sp_start(sp_t *caller_sp,
                 p++;
             if (*p == '\0')
                 break;
+            else if ((kw = "ASCII", !strncasecmp(p, kw, strlen(kw))) ||
+                     (kw = "UTF_8", !strncasecmp(p, kw, strlen(kw))))
+            {
+                p += strlen(kw);
+                sp->flags |= SP_UTF_8;
+            }
             else if (kw = "DEFAULT_FILE_MODE=", !strncasecmp(p, kw, strlen(kw)))
             {
                 p += strlen(kw);
@@ -3317,6 +3368,11 @@ int sp_start(sp_t *caller_sp,
                 }
                 else
                     syntax_error(sp, p, "unrecognized file access mode");
+            }
+            else if (kw = "GROUP_BY", !strncasecmp(p, kw, strlen(kw)))
+            {
+                p += strlen(kw);
+                sp->flags |= SP_GROUP_BY;
             }
             else if (kw = "IN_BUF_SIZE=", !strncasecmp(p, kw, strlen(kw)))
             {
@@ -3386,18 +3442,24 @@ int sp_start(sp_t *caller_sp,
             {
                 p += strlen(kw);
                 sp->rec_size = (int)get_numeric_arg(sp, &p);
-            }
-            else if (kw = "REDUCE_BY_KEYS=", !strncasecmp(p, kw, strlen(kw)))
-            {
-                p += strlen(kw);
-                sp->group_by_keys = get_numeric_arg(sp, &p);
-                sp->flags |= SP_REDUCE_BY_KEYS;
+                sp->flags |= SP_FIXED;
+                if (sp->rec_size <= 0)
+                {
+                    start_error(sp, "sp_start: "
+                                "REC_SIZE must be greater than 0\n");
+                    return (sp->error_code);
+                }
             }
             else if (kw = "RW_TEST_SIZE=", !strncasecmp(p, kw, strlen(kw)))
             {
                 p += strlen(kw);
                 Default_rw_test_size = get_numeric_arg(sp, &p);
                 Default_rw_test_size *= get_scale(&p);
+            }
+            else if (kw = "WHOLE_BUF", !strncasecmp(p, kw, strlen(kw)))
+            {
+                p += strlen(kw);
+                sp->flags |= SP_WHOLE_BUF;
             }
             else
                 syntax_error(sp, p, "unrecognized keyword");
@@ -3407,15 +3469,39 @@ int sp_start(sp_t *caller_sp,
         }
         free(args);
     }
-    
-    if (REC_TYPE(sp) == SP_FIXED)
+
+    if (REC_TYPE(sp) == 0)
     {
-        if (sp->rec_size <= 0)
+        start_error(sp, "sp_start: a record type must be specified\n");
+        return (sp->error_code);
+    }
+    if (REC_TYPE(sp) == SP_UTF_8)
+    {
+        if (strlen((char *)sp->delimiter) > 1)
         {
             start_error(sp, "sp_start: "
-                        "fixed-size records must have a declared size\n");
+                        "currently only single-char delimiters are allowed\n");
             return (sp->error_code);
         }
+    }
+    else if (REC_TYPE(sp) == SP_UNICODE)
+    {
+        start_error(sp,
+                    "sp_start: unicode records are currently not supported\n");
+        return (sp->error_code);
+    }
+    else if (REC_TYPE(sp) == SP_FIXED)
+    {
+        /* nothing for now */
+    }
+    else if (REC_TYPE(sp) == SP_WHOLE_BUF)
+    {
+        /* nothing for now */
+    }
+    else
+    {
+        start_error(sp, "sp_start: multiple record types specified\n");
+        return (sp->error_code);
     }
 
     /* alloc rec output buffers for each task */
@@ -3462,7 +3548,7 @@ int sp_start(sp_t *caller_sp,
     pthread_cond_init(&sp->task_output_ready_cond, NULL);
     pthread_cond_init(&sp->task_output_empty_cond, NULL);
 
-    /* create thread sump members */
+    /* create thread sump threads */
     sp->thread = (pthread_t *)calloc(sp->num_threads, sizeof(pthread_t *));
     for (i = 0; i < sp->num_threads; i++)
     {
@@ -3551,8 +3637,8 @@ const char *sp_get_error_string(sp_t sp, int error_code)
         err_code_str = "SP_SORT_EXEC_ERROR: sort execution error";
         break;
 
-      case SP_REDUCE_BY_MISMATCH:
-        err_code_str = "SP_REDUCE_BY_MISMATCH: reduce-by mismatch";
+      case SP_GROUP_BY_MISMATCH:
+        err_code_str = "SP_GROUP_BY_MISMATCH: group-by mismatch";
         break;
 
       case SP_SORT_INCOMPATIBLE:

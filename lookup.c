@@ -190,7 +190,8 @@ int main(int argc, char *argv[])
     /*printf("%lld us to build hash table\n", sp_get_time_us() - begin_time);*/
 
     /* start sump pump to read lookup.txt file and lookup key values */
-    if (sp_start(&sp, lookup_pump, SP_UTF_8, 
+    if (sp_start(&sp, lookup_pump,
+                 "ASCII "
                  "IN_FILE=lookupin.txt OUTPUTS=2 "
                  "OUT_FILE[0]=match.txt OUT_FILE[1]=nomatch.txt "
                  "IN_BUF_SIZE=4m "

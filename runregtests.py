@@ -34,7 +34,9 @@
 #                       not lines of text.
 #           upperwhole  Same as upper, but entire input buffers are operated
 #                       on a once instead of record at a time.
-#           reduce      Tests a sump pump "reduce" operation.  
+#           reduce      Tests a sump pump "reduce" operation for lines of text.
+#           reducefixed Tests a sump pump "reduce" operation for fixed-width
+#                       records.
 #
 import os
 import sys
@@ -63,12 +65,15 @@ for i in range(iteration_count):
     tasks = randint(1,3)
     threads = randint(1,20)
     rec_size = ''
-    reduce_by_keys = ''
+    reduce_input_file = ''
     if randint(0, 1) == 0:
-        testprog = 'reduce'
-        reduce_by_keys = str(randint(0, 3))
-        correctoutput = 'rout' + reduce_by_keys + '_correct.txt'
-        reduce_by_keys = ' REDUCE_BY_KEYS=' + reduce_by_keys
+        if randint(0, 1) == 0:
+            testprog = 'reduce'
+        else:
+            testprog = 'reducefixed'
+        match_keys = str(randint(1, 3))
+        correctoutput = 'rout' + match_keys + '_correct.txt'
+        reduce_input_file = ' IN_FILE=rin' + match_keys + '.txt'
     else:
         testindex = randint(1,3)
         if testindex == 1:
@@ -85,7 +90,7 @@ for i in range(iteration_count):
         elif testindex == 3:
             testprog = 'upperwhole' 
             correctoutput = 'upper_correct.txt'
-    cmd = './' + testprog + rec_size + reduce_by_keys + \
+    cmd = './' + testprog + rec_size + reduce_input_file + \
           ' OUT_BUF_SIZE[0]=' + str(outsize) + \
           ' IN_BUF_SIZE=' + str(insize) + \
           ' RW_TEST_SIZE=' + str(rwsize) + \

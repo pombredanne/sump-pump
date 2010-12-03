@@ -86,8 +86,7 @@ int main(int argc, char *argv[])
         Rec_size = atoi(argv[1] + 9);
     if (sp_start(&sp,
                  onebyone ? uppercase_justone : uppercase_while,
-                 SP_UTF_8 | SP_FIXED, 
-                 "IN_FILE=rin.txt OUT_FILE[0]=rout.txt %s",
+                 "IN_FILE=rin1.txt OUT_FILE[0]=rout.txt %s",
                  sp_argv_to_str(argv + 1, argc - 1)) != SP_OK)
         fprintf(stderr, "sp_start() error\n"), exit(1);
 

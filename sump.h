@@ -52,28 +52,6 @@
 #include <stdio.h>
 #include <sys/types.h>
 
-/* values for the "flags" argument to sp_start() function
- */
-#define SP_UNICODE                      0x0001  /* not yet supported */
-#define SP_UTF_8                        0x0002  /* input records are utf-8
-                                                 * characters */
-#define SP_ASCII   SP_UTF_8
-#define SP_FIXED                        0x0003  /* input records are a fixed
-                                                 * number of bytes */
-#define SP_WHOLE_BUF                    0x0004  /* there are no input records,
-                                                 * instead there is only an
-                                                 * input buffer */
-#define SP_REC_TYPE_MASK                0x0007
-#define SP_KEY_DIFF                     0x0008  /* for sp_start_sort():
-                                                 * causes the sort to provide
-                                                 * the extra information
-                                                 * necessary to allow a
-                                                 * subsequent sump pump to
-                                                 * "reduce" sorted records
-                                                 * by record key groups */
-#define SP_RESERVED_1                   0x0010  /* reserved, don't use */
-#define SP_RESERVED_2                   0x0020  /* reserved, don't use */
-
 
 /* sump pump type */
 typedef struct sump *sp_t;
@@ -112,23 +90,19 @@ const char *sp_get_id(void);
  *      sp -          Pointer to where to return newly allocated sp_t 
  *                    identifier that will be used in as the first argument
  *                    to all subsequent sp_*() calls.
- *      pump_func - Pointer to pump function that will be called by
+ *      pump_func -   Pointer to pump function that will be called by
  *                    multiple sump pump threads at once.
- *      flags -       Unsigned int with the following possible values:
- *                    SP_UTF_8        Records consist of utf-8 characters with
- *                                    newline as the record delimiter
- *                    SP_ASCII        Same as SP_UTF_8
- *                    SP_FIXED        Input records are a fixed number of bytes
- *                    SP_WHOLE_BUF    There are no input records, instead 
- *                                    there is only an input buffer
  *      arg_fmt -     Printf-format-like string that can be used with
  *                    subsequent arguments as follows:
- *                    REDUCE_BY_KEYS=%d   Group input records by the given
+ *                    ASCII or UTF_8      Input records are ascii/utf-8 
+ *                                        characters delimited by a newline
+ *                                        character.
+ *                    GROUP_BY            Group input records by the given
  *                                        number of keys for the purpose of
  *                                        reducing them.  The sump pump input
  *                                        should be coming from an nsort
- *                                        instance where the SP_KEY_DIFF
- *                                        flag has been set.
+ *                                        instance where the "-match"
+ *                                        directive has been declared.
  *                    IN_FILE=%s          Input file name for the sump pump
  *                                        input.  if not specified, the input
  *                                        should be written into the sump pump
@@ -151,11 +125,18 @@ const char *sp_get_id(void);
  *                                        the output should be read either
  *                                        by calls to sp_read_output() or by
  *                                        sp_start_link().
- *                    REC_SIZE=%d         Defines the record size in bytes
- *                                        when the SP_FIXED flag is used
+ *                    REC_SIZE=%d         Defines the input record size in 
+ *                                        bytes. The record contents need not 
+ *                                        be ascii nor delimited by a newline
+ *                                        character.
+ *                    WHOLE_BUF           Processing is not done by input
+ *                                        records so not input record type
+ *                                        should be defined.  Instead,
+ *                                        processing is done by whole input
+ *                                        buffers.
  *      ...           potential subsequent arguments to prior arg_fmt
  */
-int sp_start(sp_t *sp, sp_pump_t pump_func, unsigned flags, char *arg_fmt, ...);
+int sp_start(sp_t *sp, sp_pump_t pump_func, char *arg_fmt, ...);
 
 
 /* sp_argv_to_str - bundle up the specified argv and return it as a string
@@ -176,15 +157,17 @@ const char *sp_argv_to_str(char *argv[], int argc);
  *      sp -       Pointer to where to return newly allocated sp_t 
  *                 identifier that will be used in as the first
  *                 argument to all subsequent sp_*() calls.
- *      flags -    Unsigned int with the following possible values:
- *                   SP_KEY_DIFF     Output records should be preceded
- *                                   by a single byte that indicates how
- *                                   many keys in this record are the
- *                                   same as in the previous record.
- *      def -      Nsort sort definition string. 
+ *      def -      Nsort sort definition string.  Besides the Nsort 
+ *                 commands listed in the Nsort User Guide, the following
+ *                 directives are also recognized:
+ *                   -match[=%d] Each output record will be preceded by a
+ *                               single byte that indicates the
+ *                               specified number of keys in this record
+ *                               are the same as in the previous record.
+ *                               If no key number is specified, all keys
+ *                               are examined for a match condition.
  */
 int sp_start_sort(sp_t *sp,
-                  unsigned flags,
                   char *def_fmt,
                   ...);
 
@@ -193,6 +176,11 @@ int sp_start_sort(sp_t *sp,
  *                     for an nsort sump pump that has completed.
  */
 const char *sp_get_sort_stats(sp_t sp);
+
+
+/* sp_get_nsort_version - get the subversion version for sump pump
+ */
+const char *sp_get_nsort_version(void);
 
 
 /* sp_link - start a link/connection between an output
@@ -375,12 +363,13 @@ void pfunc_mutex_unlock(sp_task_t t);
 /* SP_SORT_EXEC_ERROR - an error occurred during sort execution. */
 #define SP_SORT_EXEC_ERROR      (-9)
 
-/* SP_REDUCE_BY_MISMATCH - a call to sp_link() linked a sump pump output
- *                         where the SP_KEY_DIFF spec did not match the
- *                         REDUCE_BY_KEYS spec for the linked sump pump
- *                         input.  Either neither should be specified or
- *                         both, not just one. */
-#define SP_REDUCE_BY_MISMATCH   (-10)
+/* SP_GROUP_BY_MISMATCH - a call to sp_link() linked a sump pump output
+ *                        where the "-match" directive for the source
+ *                        sort sump pump did not match the GROUP_BY
+ *                        directive for the linked to sump pump.
+ *                        Either neither should be specified or both,
+ *                        not just one. */
+#define SP_GROUP_BY_MISMATCH   (-10)
 
 /* SP_SORT_INCOMPATIBLE - sump pump read/write function incompatible with
                           a sort sump pump */

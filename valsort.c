@@ -260,7 +260,7 @@ int main(int argc, char *argv[])
      * blocks of BLK_RECS records that will be summarized by separate
      * threads.  this thread will then validate the summaries.
      */
-    ret = sp_start(&sp_val, summarize_records, SP_FIXED,
+    ret = sp_start(&sp_val, summarize_records,
                    "IN_FILE=%s IN_BUF_SIZE=%d "
                    "REC_SIZE=%d OUT_BUF_SIZE[0]=%d %s",
                    argv[1],

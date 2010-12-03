@@ -17,6 +17,7 @@ libnsort.so.1 {
 		sp_open_file_dst;
 		sp_file_wait;
 		sp_get_error_string;
+		sp_get_nsort_version;
 		pfunc_get_rec;
 		pfunc_get_in_buf;
 		pfunc_get_out_buf;

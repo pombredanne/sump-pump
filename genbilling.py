@@ -1,14 +1,14 @@
 #!/usr/bin/python
 #
 # genbilling.py - program to generate the input file and correct output
-#                 to the chaingang billing example.
+#                 to the SUMP Pump billing example.
 #
 # $Revision$
 #
 # Usage: genbilling.py 1000000 | sort -k 5,5 -t , > billing_input.txt
 #        This will also create billing_correct_output.txt which can be
 #        used to verify the correctness of the billing_output.txt file
-#        created by the chaingang billing example.
+#        created by the SUMP Pump billing example.
 #
 # Copyright (C) 2010, Ordinal Technology Corp, http://www.ordinal.com
 # 

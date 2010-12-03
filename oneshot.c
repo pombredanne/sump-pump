@@ -55,11 +55,11 @@ int main(int argc, char *argv[])
      * to fail.
      */
     def = "THREADS=1 TASKS=1 IN_BUF_SIZE=1 REC_SIZE=1";
-    ret = sp_start(&sp, error_pump, SP_FIXED, def);
+    ret = sp_start(&sp, error_pump, def);
     if (ret != SP_OK)
     {
         fprintf(stderr, "return status from sp_start(&sp, error_pump, "
-                "SP_FIXED, \"%s\") is not SP_OK: %d\n", def, ret);
+                "\"%s\") is not SP_OK: %d\n", def, ret);
         return (1);
     }
     /* should get an error before loop completes */
@@ -71,7 +71,7 @@ int main(int argc, char *argv[])
             if (i == 9)
             {
                 fprintf(stderr, "return status from sp_start(&sp, error_pump"
-                        ", SP_FIXED, \"%s\") never failed\n", def);
+                        ", \"%s\") never failed\n", def);
                 return (1);
             }
             continue;  /* try again */
@@ -99,7 +99,6 @@ int main(int argc, char *argv[])
      * only works if there has not yet been a successfully licensed sort.
      */
     ret = sp_start_sort(&sp,
-                        0,
                         "-license=\"\" ");
     if (ret == SP_NSORT_LINK_FAILURE)
     {
@@ -126,11 +125,11 @@ int main(int argc, char *argv[])
          * EOF or on the first sp_read_output() call.
          */
         def = "-format:max=10 -memory:20m";
-        ret = sp_start_sort(&sp, 0, def);
+        ret = sp_start_sort(&sp, def);
         longlinelen = strlen(longline);
         if (ret != SP_OK)
         {
-            fprintf(stderr, "return status from sp_start_sort(&sp, 0 \"%s\") "
+            fprintf(stderr, "return status from sp_start_sort(&sp, \"%s\") "
                     "is not SP_OK: %d\n", def, ret);
             return (1);
         }

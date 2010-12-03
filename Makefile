@@ -8,7 +8,7 @@
 include Make.version
 
 #regression tests and files
-REG_TESTS=reduce upper upperfixed upperwhole oneshot sumpversion
+REG_TESTS=reduce reducefixed upper upperfixed upperwhole oneshot sumpversion
 REG_FILES=rin.txt upper_correct.txt rout0_correct.txt rout1_correct.txt \
           rout2_correct.txt rout3_correct.txt
 
@@ -55,6 +55,9 @@ oneshot: oneshot.c $(LIB)
 
 reduce: reduce.c $(LIB)
 	gcc -g -o reduce reduce.c $(LIB)
+
+reducefixed: reducefixed.c $(LIB)
+	gcc -g -o reducefixed reducefixed.c $(LIB)
 
 upper: upper.c $(LIB)
 	gcc -g -o upper upper.c $(LIB)
