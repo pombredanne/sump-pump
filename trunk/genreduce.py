@@ -1,37 +1,36 @@
 #!/usr/bin/python
 #
 # genreduce.py - program to generate the input file and correct output files
-#                for the chaingang reduce (not mapreduce) regression test.
+#                for the SUMP Pump reduce (not mapreduce) regression test.
 #
 # $Revision$
 #
 # Usage: genreduce.py
 #     This will create the following files:
-#         rin.txt           - Currently the input file for all chaingang
+#         rin1.txt          - Currently the input file for most SUMP Pump
 #                             regression tests.  Its format matches what
 #                             would come out of Nsort when using the
-#                             CG_KEY_DIFF flag.  There is a an initial
-#                             character that indicates number of sequential
-#                             keys (starting the first key) in the record
-#                             that match the corresponding keys in the
+#                             -match=1 directive.  There is a an initial
+#                             character for each record that indicates 
+#                             whether 1 key (starting the first key) in the 
+#                             record matchs the corresponding key in the
 #                             previous record.  This format is required to
-#                             to test "reduce" chaingangs, i.e. those that
-#                             use the GROUP_BY_KEYS=n directive.
+#                             to test "reduce" SUMP Pumps.
 #                             This file is also exactly 27720 bytes, allowing
 #                             it to be used to test all fixed-length record
 #                             sizes from 1 to 12 bytes.
+#         rin2.txt          - Similar to rin1.txt, except as if using -match=2
+#         rin3.txt          - Similar to rin1.txt, except as if using -match=3
 #         upper_correct.txt - This is the correct output for the non-reduce
 #                             tests (upper, upperfixed, upperwhole) that
 #                             simply change all lower case characters to
 #                             upper case.
-#         rout0_correct.txt - This is the correct output of the reduce test
-#                             when GROUP_BY_KEYS=0 is used.
 #         rout1_correct.txt - This is the correct output of the reduce test
-#                             when GROUP_BY_KEYS=1 is used.
+#                             when rin1.txt is used as the input file.
 #         rout2_correct.txt - This is the correct output of the reduce test
-#                             when GROUP_BY_KEYS=2 is used.
+#                             when rin2.txt is used as the input file.
 #         rout3_correct.txt - This is the correct output of the reduce test
-#                             when GROUP_BY_KEYS=3 is used.
+#                             when rin3.txt is used as the input file.
 #
 # Copyright (C) 2010, Ordinal Technology Corp, http://www.ordinal.com
 # 
@@ -72,16 +71,26 @@ def printsum(f, s):
     print >> f, '%s %s %s %d' % \
           (alpha3(key[0]), alpha3(key[1]), alpha3(key[2]), s)
 
-def printrec(rin, up, d, x):
-    line = '%d%s %s %s %d' % \
-           (d, alpha3(key[0]), alpha3(key[1]), alpha3(key[2]), x)
-    print >> rin, line
-    print >> up, line.upper()
+def printrec(up, m, x):
+    line = '%s %s %s %d' % \
+           (alpha3(key[0]), alpha3(key[1]), alpha3(key[2]), x)
+    mc = '0'
+    if (m >= 1):
+        mc = '1'
+    print >> rin1, '%s%s' % (mc, line)
+    print >> up, '%s%s' % (mc, line.upper())
+    if (m == 1):
+        mc = '0'
+    print >> rin2, '%s%s' % (mc, line)
+    if (m == 2):
+        mc = '0'
+    print >> rin3, '%s%s' % (mc, line)
     
 seed(0)     # generate same records each time
-rin = open('rin.txt', 'w')
 up = open('upper_correct.txt', 'w')
-rout0 = open('rout0_correct.txt', 'w')
+rin1 = open('rin1.txt', 'w')
+rin2 = open('rin2.txt', 'w')
+rin3 = open('rin3.txt', 'w')
 rout1 = open('rout1_correct.txt', 'w')
 rout2 = open('rout2_correct.txt', 'w')
 rout3 = open('rout3_correct.txt', 'w')
@@ -90,10 +99,11 @@ sum[0] = dgt
 sum[1] = dgt
 sum[2] = dgt
 sum[3] = dgt
-printrec(rin, up, 0, dgt)
+printrec(up, 0, dgt)
 for i in range(1847):  # carefully chosen range so that rin.txt is 27720 bytes
-    diff = randint(0, 3)
-    if (diff == 0):
+    match = randint(0, 3)
+    if (match == 0):
+        # 0 matching keys relative to previous record
         printsum(rout1, sum[1])
         sum[1] = 0
         printsum(rout2, sum[2])
@@ -103,14 +113,16 @@ for i in range(1847):  # carefully chosen range so that rin.txt is 27720 bytes
         key[0] = key[0] + 1
         key[1] = 0
         key[2] = 0
-    elif (diff == 1):
+    elif (match == 1):
+        # 1 matching keys relative to previous record
         printsum(rout2, sum[2])
         sum[2] = 0
         printsum(rout3, sum[3])
         sum[3] = 0
         key[1] = key[1] + 1
         key[2] = 0
-    elif (diff == 2):
+    elif (match == 2):
+        # 2 matching keys relative to previous record
         printsum(rout3, sum[3])
         sum[3] = 0
         key[2] = key[2] + 1
@@ -119,8 +131,7 @@ for i in range(1847):  # carefully chosen range so that rin.txt is 27720 bytes
     sum[1] = sum[1] + dgt
     sum[2] = sum[2] + dgt
     sum[3] = sum[3] + dgt
-    printrec(rin, up, diff, dgt)
-printsum(rout0, sum[0])
+    printrec(up, match, dgt)
 printsum(rout1, sum[1])
 printsum(rout2, sum[2])
 printsum(rout3, sum[3])

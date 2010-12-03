@@ -62,8 +62,8 @@ int main(int argc, char *argv[])
     sp_t                sp;
     int                 ret;
 
-    if (sp_start(&sp, reduce, SP_UTF_8,
-                 "IN_FILE=rin.txt OUT_FILE[0]=rout.txt %s",
+    if (sp_start(&sp, reduce, 
+                 "UTF_8 GROUP_BY OUT_FILE[0]=rout.txt %s",
                  sp_argv_to_str(argv + 1, argc - 1)) != SP_OK)
         fprintf(stderr, "sp_start() error\n"), exit(1);
 

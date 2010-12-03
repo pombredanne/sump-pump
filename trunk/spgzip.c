@@ -97,7 +97,8 @@ int main(int argc, char *argv[])
 
     /* max expansion is 0.03% + gzip header size (+1 more for rounding up) */
     out_buf_size = (size_t)((double)in_buf_size * 1.0003) + 512;
-    ret = sp_start(&sp, gzip_pump, SP_WHOLE_BUF,
+    ret = sp_start(&sp, gzip_pump,
+                   "WHOLE_BUF "
                    "IN_FILE=<stdin> OUT_FILE[0]=<stdout> "             
                    "IN_BUF_SIZE=%d OUT_BUF_SIZE[0]=%d %s",
                    in_buf_size, out_buf_size,

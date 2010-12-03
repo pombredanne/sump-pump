@@ -221,7 +221,7 @@ int main(int argc, char *argv[])
      * exactly one instruction.  The output buffer size will hold the
      * maximum number of records that will be generated per instruction.
      */
-    ret = sp_start(&sp_gen, gen_block, SP_FIXED,
+    ret = sp_start(&sp_gen, gen_block,
                    "IN_BUF_SIZE=%d REC_SIZE=%d OUT_BUF_SIZE[0]=%d "
                    "OUT_FILE[0]=%s %s",
                    sizeof(struct gen_instruct),  /* input buf size */

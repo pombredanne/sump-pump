@@ -267,8 +267,8 @@ int main(int argc, char *argv[])
     sp_arg = sp_argv_to_str(argv + 3, argc - 3);
 
     /* start map sump pump */
-    ret = sp_start(&sp_map, map_pump, SP_ASCII,
-                   "IN_FILE=%s %s", argv[1], sp_arg);
+    ret = sp_start(&sp_map, map_pump,
+                   "ASCII IN_FILE=%s %s", argv[1], sp_arg);
     if (ret != SP_OK)
     {
         fprintf(stderr, "sp_start for map failed: %s\n",
@@ -278,13 +278,13 @@ int main(int argc, char *argv[])
 
     /* start sort */
     ret = sp_start_sort(&sp_sort,
-                        SP_KEY_DIFF,  /* add key difference prefix to output */
                         /* input is lines of text, comma separated fields */
-                        "-format:delim=nl,separator=comma"
-                        " -key=char,position=1" /* account is primary key */
-                        " -key=char,position=3" /* datetime is secondary key */
-                        " -memory=700m"   /* use 700mb of memory */
-                        " -process=%d", n_threads);   /* sort thread count */
+                        "-match=1 "    /* match records only by first key */
+                        "-format:delim=nl,separator=comma "
+                        "-key=char,position=1 " /* account is primary key */
+                        "-key=char,position=3 " /* datetime is secondary key */
+                        "-memory=700m "   /* use 700mb of memory */
+                        "-process=%d ", n_threads);   /* sort thread count */
     if (ret != SP_OK)
     {
         fprintf(stderr, "sp_start_sort failed: %s\n",
@@ -293,11 +293,12 @@ int main(int argc, char *argv[])
     }
 
     /* start reduce sump pump */
-    ret = sp_start(&sp_reduce, reduce_pump, SP_ASCII,
+    ret = sp_start(&sp_reduce, reduce_pump, 
+                   "ASCII GROUP_BY "
                    "OUT_FILE[0]=%s "
                    "IN_BUF_SIZE=500000 "
                    "OUT_BUF_SIZE[0]=700000 "  /* allow for output expansion */
-                   "REDUCE_BY_KEYS=1 %s",     /* reduce only by first key */
+                   "%s ",
                    argv[2], sp_arg);
     if (ret != SP_OK)
     {
