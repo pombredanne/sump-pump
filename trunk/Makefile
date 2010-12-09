@@ -9,7 +9,7 @@ include Make.version
 
 #regression tests and files
 REG_TESTS=reduce reducefixed upper upperfixed upperwhole oneshot sumpversion
-REG_FILES=rin.txt upper_correct.txt rout0_correct.txt rout1_correct.txt \
+REG_FILES=rin1.txt rin2.txt rin3.txt upper_correct.txt rout1_correct.txt \
           rout2_correct.txt rout3_correct.txt
 
 # performance tests and files
@@ -25,6 +25,10 @@ $(LIB): sump.o
 
 all: $(LIB) reg perf
 
+# SUMP Pump object file. Optimization is not used in order to aid
+# debugging.  Optimization doesn't seem to speed things up that much as
+# most CPU use tends to be done by pump functions.
+#
 sump.o: sump.c sump.h sumpversion.h
 	gcc -c -fPIC $(CFLAGS) -g sump.c
 
@@ -94,17 +98,22 @@ rand16.o: rand16.c rand16.h
 
 # performance input files
 lookupref.txt:
+	@echo warning: generating lookupref.txt takes a long time
 	gencsv.py 0 2000000 str str | sort -u -k 1,1 -t , > lookupref.txt
 
 lookupin.txt:
+	@echo warning: generating lookupin.txt takes a long time
 	gencsv.py 1 20000000 str seq u4 u4 u4 > lookupin.txt
 
 spgzipinput:
+	@echo warning: generating spgzipinput takes a long time
 	gencsv.py 1 8000000 str seq u4 u4 > spgzipinput
 
 billing_input.txt billing_correct_output.txt:
+	@echo warning: generating billing_input.txt takes a long time
 	genbilling.py 1000000 | sort -k 5,5 -t , > billing_input.txt
 
-sortoutput.txt:
+sortoutput.txt: gensort
 	gensort 10000000 sortinput.txt
+	@echo warning: this sort takes a long time
 	(LC_ALL=C; export LC_ALL; sort sortinput.txt -o sortoutput.txt)
