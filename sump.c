@@ -1647,6 +1647,7 @@ static sp_task_t init_new_task(sp_t sp, in_buf_t *ib, char *curr_rec)
     t->input_eof = FALSE;
     t->output_eof = FALSE;
     sp->cnt_task_init++;
+    return (t);
 }
 
 

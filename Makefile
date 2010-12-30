@@ -17,6 +17,7 @@ PERF_TESTS=spgzip lookup billing gensort valsort
 PERF_FILES=lookupref.txt lookupin.txt spgzipinput billing_input.txt \
            billing_correct_output.txt sortoutput.txt
 
+CFLAGS=-ansi
 LIB=libsump.so.1
 
 $(LIB): sump.o
@@ -52,25 +53,25 @@ install: $(LIB)
 
 # regression tests
 sumpversion: sumpversion.c $(LIB)
-	gcc -g -o sumpversion sumpversion.c $(LIB)
+	gcc -g $(CFLAGS) -o sumpversion sumpversion.c $(LIB)
 
 oneshot: oneshot.c $(LIB)
-	gcc -g -o oneshot oneshot.c $(LIB)
+	gcc -g $(CFLAGS) -o oneshot oneshot.c $(LIB)
 
 reduce: reduce.c $(LIB)
-	gcc -g -o reduce reduce.c $(LIB)
+	gcc -g $(CFLAGS) -o reduce reduce.c $(LIB)
 
 reducefixed: reducefixed.c $(LIB)
-	gcc -g -o reducefixed reducefixed.c $(LIB)
+	gcc -g $(CFLAGS) -o reducefixed reducefixed.c $(LIB)
 
 upper: upper.c $(LIB)
-	gcc -g -o upper upper.c $(LIB)
+	gcc -g $(CFLAGS) -o upper upper.c $(LIB)
 
 upperfixed: upperfixed.c $(LIB)
-	gcc -g -o upperfixed upperfixed.c $(LIB)
+	gcc -g $(CFLAGS) -o upperfixed upperfixed.c $(LIB)
 
 upperwhole: upperwhole.c $(LIB)
-	gcc -g -o upperwhole upperwhole.c $(LIB)
+	gcc -g $(CFLAGS) -o upperwhole upperwhole.c $(LIB)
 
 # regression files
 $(REG_FILES):
@@ -78,22 +79,22 @@ $(REG_FILES):
 
 # performance tests
 billing: billing.c $(LIB)
-	gcc -g -o billing billing.c $(LIB) 
+	gcc -g $(CFLAGS) -o billing billing.c $(LIB) 
 
 spgzip: spgzip.c $(LIB)
-	gcc -g -o spgzip spgzip.c $(LIB) -lz 
+	gcc -g $(CFLAGS) -o spgzip spgzip.c $(LIB) -lz 
 
 lookup: lookup.c $(LIB)
-	gcc -g -o lookup lookup.c $(LIB) -lz 
+	gcc -g $(CFLAGS) -o lookup lookup.c $(LIB) -lz 
 
 gensort: gensort.c rand16.o $(LIB)
-	gcc -g -o gensort gensort.c rand16.o $(LIB) -lz 
+	gcc -g $(CFLAGS) -o gensort gensort.c rand16.o $(LIB) -lz 
 
 valsort: valsort.c rand16.o $(LIB)
-	gcc -g -o valsort valsort.c rand16.o $(LIB) -lz 
+	gcc -g $(CFLAGS) -o valsort valsort.c rand16.o $(LIB) -lz 
 
 rand16.o: rand16.c rand16.h
-	gcc -g -c rand16.c
+	gcc -g $(CFLAGS) -c rand16.c
 
 
 # performance input files

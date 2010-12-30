@@ -117,6 +117,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <strings.h>
 
 
 /* map_pump - map pump function that performs a simple 1-1 mapping to

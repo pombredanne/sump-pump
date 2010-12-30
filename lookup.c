@@ -72,7 +72,7 @@ char    *Hash[HASH_ENTRY_COUNT];
  *              record until the first comma character (or the end of record
  *              if no comma is present).
  */
-static inline int get_key_length(char *rec)
+static __inline__ int get_key_length(char *rec)
 {
     int         length;
     char        *p = rec;
@@ -83,7 +83,7 @@ static inline int get_key_length(char *rec)
 }
 
 
-static inline void fatal_file_error(char *cmd, char *filename)
+static __inline__ void fatal_file_error(char *cmd, char *filename)
 {
     fprintf(stderr, "can't %s %s: %s\n", cmd, filename, strerror(errno));
     exit(1);
