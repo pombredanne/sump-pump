@@ -51,7 +51,14 @@
 
 #include <stdio.h>
 #include <sys/types.h>
-
+#if defined(_WIN32)
+# define win_nt 1
+typedef __int64 int64_t;
+typedef unsigned __int64 uint64_t;
+# include "sump_win.h"
+#else   /* now non-Windows */
+# include <stdint.h>
+#endif
 
 /* sump pump type */
 typedef struct sump *sp_t;
@@ -195,18 +202,18 @@ int sp_link(sp_t out_sp, unsigned out_index, sp_t in_sp);
 ssize_t sp_write_input(sp_t sp, void *buf, ssize_t size);
 
 
-/* sp_get_write_buf - get a pointer to an input buffer that an external
- *                    thread can fill with input data.
+/* sp_get_in_buf - get a pointer to an input buffer that an external
+ *                 thread can fill with input data.
  */
-int sp_get_write_buf(sp_t sp, size_t index, void **buf, size_t *size);
+int sp_get_in_buf(sp_t sp, uint64_t index, void **buf, size_t *size);
 
 
-/* sp_put_write_buf_bytes - flush bytes that have been placed in a sump
- *                          pump's input buffer by an external thread.
- *                          This function should only be used by first
- *                          calling sp_get_write_buf().
+/* sp_put_in_buf_bytes - flush bytes that have been placed in a sump
+ *                       pump's input buffer by an external thread.
+ *                       This function should only be used by first
+ *                       calling sp_get_in_buf().
  */
-int sp_put_write_buf_bytes(sp_t sp, size_t index, size_t size, int eof);
+int sp_put_in_buf_bytes(sp_t sp, uint64_t index, size_t size, int eof);
 
 
 /* sp_read_output - read bytes from a specified output of the specified
@@ -297,7 +304,7 @@ int pfunc_get_thread_index(sp_task_t t);
  *                           increases with each subsequent task
  *                           issued/started by the sump pump.
  */
-size_t pfunc_get_task_number(sp_task_t t);
+uint64_t pfunc_get_task_number(sp_task_t t);
 
 
 /* pfunc_write - write function that can be used by a pump function to
