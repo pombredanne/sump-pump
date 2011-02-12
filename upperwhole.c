@@ -30,6 +30,9 @@
 #include <fcntl.h>
 #include <string.h>
 #include <stdlib.h>
+#if !defined(win_nt)
+# include <ctype.h>
+#endif
 
 
 /* uppercase - a pump function to operate on a whole input buffer.
@@ -53,7 +56,7 @@ int uppercase(sp_task_t t, void *unused)
                             "uppercase, bad status from sp_get_out_buf: %d\n",
                             status));
     p_out = out;
-    for (p_in = in; (p_in - in) < in_size; p_in++)
+    for (p_in = in; (size_t)(p_in - in) < in_size; p_in++)
     {
         if (p_out - out == out_size)
         {
