@@ -116,8 +116,12 @@
 #include <fcntl.h>
 #include <string.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <strings.h>
+#if defined(win_nt)
+# include <string.h>
+#else
+# include <unistd.h>
+# include <strings.h>
+#endif
 
 
 /* map_pump - map pump function that performs a simple 1-1 mapping to
@@ -131,7 +135,11 @@ int map_pump(sp_task_t t, void *unused)
     /* for each record in the group */
     while (pfunc_get_rec(t, &rec) > 0)
     {
+#if defined(win_nt)
+        last_comma = strrchr(rec, ',');
+#else
         last_comma = rindex(rec, ',');
+#endif
         /* ignore malformed records.  we could alternatively write
          * malformed records to a separate output file.
          */
@@ -252,7 +260,15 @@ int main(int argc, char *argv[])
     const char          *sp_arg;
     int                 ret;
     int                 print_stats = 0;
-    int                 n_threads = sysconf(_SC_NPROCESSORS_ONLN);;
+    int                 n_threads;
+# if defined(win_nt)
+    SYSTEM_INFO         si;
+
+    GetSystemInfo(&si);
+    n_threads = si.dwNumberOfProcessors;
+# else
+    n_threads = sysconf(_SC_NPROCESSORS_ONLN);
+# endif
 
     /* command line is:
      * billing [-stat] input_file output_file [sump_pump_args]
