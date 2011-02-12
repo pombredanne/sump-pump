@@ -60,32 +60,42 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#if defined(_WIN32)
+# include <io.h>
+# include <windows.h>
+# define __inline__   /* empty definition */
+# define open _open
+#else
 #include <sys/mman.h>
+#endif
 
 
 #define HASH_ENTRY_COUNT (0x400000 - 1)
 #define HASH_INDEX_FROM_CRC(x) ((x) % HASH_ENTRY_COUNT)
-char    *Hash[HASH_ENTRY_COUNT];
+unsigned char    *Hash[HASH_ENTRY_COUNT];
 
 
 /* get_key_length - get the number of characters from the beginning of a
  *              record until the first comma character (or the end of record
  *              if no comma is present).
  */
-static __inline__ int get_key_length(char *rec)
+static __inline__ int get_key_length(unsigned char *rec)
 {
-    int         length;
-    char        *p = rec;
+    unsigned char  *p = rec;
 
     while (*p != ',' && *p != '\0')  /* keep searching until comma or NULL */
         p++;
-    return (p - rec);
+    return ((int)(p - rec));
 }
 
 
 static __inline__ void fatal_file_error(char *cmd, char *filename)
 {
+#if defined(_WIN32)
+    fprintf(stderr, "can't %s %s: %d\n", cmd, filename, GetLastError());
+#else
     fprintf(stderr, "can't %s %s: %s\n", cmd, filename, strerror(errno));
+#endif
     exit(1);
 }
 
@@ -93,24 +103,44 @@ static __inline__ void fatal_file_error(char *cmd, char *filename)
  */
 void build_hash_table(char *filename)
 {
-    int         fd;
+    unsigned char   *refrecs;
+    unsigned char   *rec;
+    unsigned char   *p;
+    int             index;
+    int             key_len;
+    unsigned        crc;
+    ssize_t         filesize;
+
+    /* map the file */
+#if defined(_WIN32)
+    HANDLE      fh, mh;
+    
+    fh = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (fh == INVALID_HANDLE_VALUE)
+        fatal_file_error("CreateFile", filename);
+    mh = CreateFileMapping(fh, NULL, PAGE_READONLY, 0, 0, NULL);
+    if (mh == INVALID_HANDLE_VALUE)
+        fatal_file_error("CreateFileMapping", filename);
+    refrecs = (unsigned char *)MapViewOfFile(mh, FILE_MAP_COPY, 0, 0, 0);
+    if (refrecs == NULL)
+        fatal_file_error("MapViewOfFile", filename);
+    filesize = (ssize_t)GetFileSize(fh, NULL);
+#else
     struct stat statbuf;
-    char        *refrecs;
-    char        *rec;
-    char        *p;
-    int         index;
-    int         key_len;
-    unsigned    crc;
+    int         fd;
 
     if ((fd = open(filename, O_RDONLY)) < 0)
         fatal_file_error("open", filename);
     if (fstat(fd, &statbuf) < 0)
         fatal_file_error("fstat", filename);
-    refrecs = (char *)mmap(NULL, statbuf.st_size, PROT_READ | PROT_WRITE,
-                           MAP_PRIVATE, fd, 0);
+    refrecs = (unsigned char *)mmap(NULL, statbuf.st_size,
+                                    PROT_READ | PROT_WRITE,
+                                    MAP_PRIVATE, fd, 0);
     if (refrecs == NULL)
         fatal_file_error("mmap", filename);
-    for (rec = refrecs; rec < refrecs + statbuf.st_size; rec = p + 1)
+    filesize = (ssize_t)statbuf.st_size;
+#endif
+    for (rec = refrecs; rec < refrecs + filesize; rec = p + 1)
     {
         p = rec;
         while (*p != '\n')
@@ -136,9 +166,9 @@ void build_hash_table(char *filename)
  */
 int lookup_pump(sp_task_t t, void *unused)
 {
-    char                *rec;
+    unsigned char       *rec;
     unsigned            crc;
-    char                *entry;
+    unsigned char       *entry;
     int                 match_found;
     int                 index;
     int                 key_len;
@@ -147,7 +177,7 @@ int lookup_pump(sp_task_t t, void *unused)
     /* for each record in the task input */
     while (pfunc_get_rec(t, &rec) > 0)
     {
-        rec[strlen(rec) - 1] = '\0';    /* strip off trailing newline */
+        rec[strlen((char *)rec) - 1] = '\0';  /* strip off trailing newline */
         key_len = get_key_length(rec);
         crc = crc32(0, rec, key_len);
         match_found = 0;        /* assume no match for now */
@@ -157,7 +187,8 @@ int lookup_pump(sp_task_t t, void *unused)
         {
             entry = Hash[index];
             ref_key_len = get_key_length(entry);
-            if (key_len == ref_key_len && strncmp(rec, entry, key_len) == 0)
+            if (key_len == ref_key_len &&
+                strncmp((char *)rec, (char *)entry, key_len) == 0)
             {
                 match_found = 1;
                 /* output entire record in input file to match.txt */
@@ -175,30 +206,23 @@ int lookup_pump(sp_task_t t, void *unused)
 
 int main(int argc, char *argv[])
 {
-    int                 i;
     sp_t                sp;
-    char                *fname;
     int                 ret;
-    char                dummy_buf[10];
-    int                 n_chars = 0;
-    int                 file_buf_size;
     /* sp_time_t           begin_time = sp_get_time_us(); */
-    unsigned            index;
-    struct hash_entry   *entry;
 
     build_hash_table("lookupref.txt");
     /*printf("%lld us to build hash table\n", sp_get_time_us() - begin_time);*/
 
     /* start sump pump to read lookup.txt file and lookup key values */
-    if (sp_start(&sp, lookup_pump,
-                 "ASCII "
-                 "IN_FILE=lookupin.txt OUTPUTS=2 "
-                 "OUT_FILE[0]=match.txt OUT_FILE[1]=nomatch.txt "
-                 "IN_BUF_SIZE=4m "
-                 "OUT_BUF_SIZE[0]=8m "  /* 2x bigger */
-                 "OUT_BUF_SIZE[1]=8m "  /* 2x bigger */
-                 "%s",
-                 sp_argv_to_str(argv + 1, argc - 1)) != SP_OK)
+    if ((ret = sp_start(&sp, lookup_pump,
+                        "ASCII "
+                        "IN_FILE=lookupin.txt OUTPUTS=2 "
+                        "OUT_FILE[0]=match.txt OUT_FILE[1]=nomatch.txt "
+                        "IN_BUF_SIZE=4m "
+                        "OUT_BUF_SIZE[0]=8m "  /* 2x bigger */
+                        "OUT_BUF_SIZE[1]=8m "  /* 2x bigger */
+                        "%s",
+                        sp_argv_to_str(argv + 1, argc - 1))) != SP_OK)
     {
         fprintf(stderr, "sp_start failed: %s\n", sp_get_error_string(sp, ret));
         exit(1);
