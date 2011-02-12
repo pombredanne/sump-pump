@@ -41,7 +41,6 @@ int error_pump(sp_task_t t, void *unused)
 int main(int argc, char *argv[])
 {
     sp_t                sp;
-    const char          *sp_arg;
     int                 ret;
     const char          *error_str;
     char		*longline = "A really long line -------------------\n";
