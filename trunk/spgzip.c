@@ -44,12 +44,12 @@
  */
 int gzip_pump(sp_task_t t, void *unused)
 {
-    z_stream    strm;
-    char        *in;
-    size_t      in_size;
-    char        *out;
-    size_t      out_size;
-    int         ret;
+    z_stream        strm;
+    unsigned char   *in;
+    size_t          in_size;
+    unsigned char   *out;
+    size_t          out_size;
+    int             ret;
 
     /* get input buffer */
     if ((ret = pfunc_get_in_buf(t, (void **)&in, &in_size)) != 0)
@@ -60,11 +60,12 @@ int gzip_pump(sp_task_t t, void *unused)
         return (pfunc_error(t, "gzip_pump: "
                             "bad ret from sp_get_out_buf: %d\n", ret));
     /* setup strm structure for zlib's deflate */
-    bzero(&strm, sizeof(strm));
+    memset(&strm, 0, sizeof(strm));
+
     strm.next_in = in;
-    strm.avail_in = in_size;
+    strm.avail_in = (unsigned)in_size;
     strm.next_out = out;
-    strm.avail_out = out_size;
+    strm.avail_out = (unsigned)out_size;
     ret = deflateInit2(&strm,
                        Z_DEFAULT_COMPRESSION, /* level */
                        Z_DEFLATED,            /* method */
