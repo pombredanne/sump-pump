@@ -30,6 +30,9 @@
 #include <fcntl.h>
 #include <string.h>
 #include <stdlib.h>
+#if !defined(win_nt)
+# include <ctype.h>
+#endif
 
 int     Rec_size = 1;
 
@@ -58,7 +61,7 @@ int uppercase_justone(sp_task_t t, void *unused)
      * call this pump function again to get next record in the task
      * input (if any).
      */
-    ret = pfunc_get_rec(t, &rec);
+    ret = (int)pfunc_get_rec(t, &rec);
     if (ret <= 0)
         return (pfunc_error(t, "first sp_get_rec() returned rec of size: %d\n",
                             ret));
@@ -84,11 +87,12 @@ int main(int argc, char *argv[])
 
     if (argc > 1 && !strncmp(argv[1], "REC_SIZE=", 9))
         Rec_size = atoi(argv[1] + 9);
-    if (sp_start(&sp,
-                 onebyone ? uppercase_justone : uppercase_while,
-                 "IN_FILE=rin1.txt OUT_FILE[0]=rout.txt %s",
-                 sp_argv_to_str(argv + 1, argc - 1)) != SP_OK)
-        fprintf(stderr, "sp_start() error\n"), exit(1);
+    ret = sp_start(&sp,
+                   onebyone ? uppercase_justone : uppercase_while,
+                   "IN_FILE=rin1.txt OUT_FILE[0]=rout.txt %s",
+                   sp_argv_to_str(argv + 1, argc - 1));
+    if (ret != SP_OK)
+        fprintf(stderr, "sp_start() error: %d\n", ret), exit(1);
 
     if ((ret = sp_wait(sp)) != SP_OK)
         fprintf(stderr, "sp_wait: %s\n", sp_get_error_string(sp, ret)), exit(1); 
