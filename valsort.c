@@ -41,21 +41,21 @@
 #define SUM_SIZE (sizeof(struct summary))
 
 /* Comparison routine, either memcmp() or strcasecmp() */
-int     (*Compare)(const char *a, const char *b, size_t n) =
-    (int (*)(const char *a, const char *b, size_t n))memcmp;
+int     (*Compare)(const unsigned char *a, const unsigned char *b, size_t n) =
+    (int (*)(const unsigned char *a, const unsigned char *b, size_t n))memcmp;
 
 /* struct used to summarize a partition of sort output
  */
 struct summary
 {
-    u16         first_unordered;     /* index of first unordered record,
-                                      * or 0 if no unordered records */
-    u16         unordered_count;     /* total number of unordered records */
-    u16         rec_count;           /* total number of records */
-    u16         dup_count;           /* total number of duplicate keys */
-    u16         checksum;            /* checksum of all records */
-    char        first_rec[REC_SIZE]; /* first record */
-    char        last_rec[REC_SIZE];  /* last record */
+    u16             first_unordered;     /* index of first unordered record,
+                                          * or 0 if no unordered records */
+    u16             unordered_count;     /* total number of unordered records*/
+    u16             rec_count;           /* total number of records */
+    u16             dup_count;           /* total number of duplicate keys */
+    u16             checksum;            /* checksum of all records */
+    unsigned char   first_rec[REC_SIZE]; /* first record */
+    unsigned char   last_rec[REC_SIZE];  /* last record */
 };
 
 struct summary Summary;
@@ -64,14 +64,14 @@ struct summary Summary;
 /* next_rec - get the next record to be validated
  *
  */
-char *next_rec(void *in, char *rec_buf, struct summary *sum)
+unsigned char *next_rec(void *in, struct summary *sum)
 {
     int                 read_size;
-    char                *rec = NULL;
+    unsigned char       *rec = NULL;
     u16                 temp16 = {0LL, 0LL};
 
     /* get the record from the sump pump infrastructure */
-    read_size = pfunc_get_rec(in, &rec);
+    read_size = (int)pfunc_get_rec(in, &rec);
     
     if (read_size == REC_SIZE)
     {
@@ -104,24 +104,22 @@ int summarize_records(sp_task_t t, void *unused)
     int                 diff;
     u16                 one = {0LL, 1LL};
     unsigned char       *rec;
-    unsigned char       rec_buf[REC_SIZE];
     unsigned char       prev[REC_SIZE];
-    char                sumbuf[U16_ASCII_BUF_SIZE];
     struct summary      local_summary;
 
     sum = &local_summary;
-    bzero(sum, sizeof(struct summary));
+    memset(sum, 0, sizeof(struct summary));
 
-    if ((rec = next_rec(t, rec_buf, sum)) == NULL)
+    if ((rec = next_rec(t, sum)) == NULL)
     {
         fprintf(stderr, "there must be at least one record to be validated\n");
         exit(1);
     }
-    bcopy(rec, sum->first_rec, REC_SIZE);
-    bcopy(rec, prev, REC_SIZE);
+    memcpy(sum->first_rec, rec, REC_SIZE);
+    memcpy(prev, rec, REC_SIZE);
     sum->rec_count = add16(sum->rec_count, one);
     
-    while ((rec = next_rec(t, rec_buf, sum)) != NULL)
+    while ((rec = next_rec(t, sum)) != NULL)
     {
         /* make sure the record key is equal to or more than the
          * previous key
@@ -140,9 +138,9 @@ int summarize_records(sp_task_t t, void *unused)
         }
 
         sum->rec_count = add16(sum->rec_count, one);
-        bcopy(rec, prev, REC_SIZE);
+        memcpy(prev, rec, REC_SIZE);
     }
-    bcopy(prev, sum->last_rec, REC_SIZE);  /* set last record for summary */
+    memcpy(sum->last_rec, prev, REC_SIZE);  /* set last record for summary */
 
     pfunc_write(t, 0, sum, SUM_SIZE);
     return (SP_OK);
@@ -154,9 +152,8 @@ int summarize_records(sp_task_t t, void *unused)
 int next_sum(void *in, struct summary *sum)
 {
     int                 ret;
-    u16                 temp16 = {0LL, 0LL};
 
-    ret = sp_read_output(in, 0, sum, SUM_SIZE);  /* get from sump pump */
+    ret = (int)sp_read_output(in, 0, sum, SUM_SIZE);  /* get from sump pump */
     
     if (ret == 0)
         return (0);
@@ -179,11 +176,9 @@ int next_sum(void *in, struct summary *sum)
  */
 void sum_summaries(void *in)
 {
-    struct summary      *sum;
     int                 diff;
     u16                 one = {0LL, 1LL};
-    char                rec_buf[REC_SIZE];
-    char                prev[REC_SIZE];
+    unsigned char       prev[REC_SIZE];
     char                sumbuf[U16_ASCII_BUF_SIZE];
     struct summary      local_sum;
 
@@ -192,8 +187,8 @@ void sum_summaries(void *in)
         fprintf(stderr, "there must be at least one record to be validated\n");
         exit(1);
     }
-    bcopy(&local_sum, &Summary, SUM_SIZE);
-    bcopy(Summary.last_rec, prev, REC_SIZE);
+    memcpy(&Summary, &local_sum, SUM_SIZE);
+    memcpy(prev, Summary.last_rec, REC_SIZE);
     
     while (next_sum(in, &local_sum))
     {
@@ -231,9 +226,9 @@ void sum_summaries(void *in)
         Summary.rec_count = add16(Summary.rec_count, local_sum.rec_count);
         Summary.dup_count = add16(Summary.dup_count, local_sum.dup_count);
         Summary.checksum = add16(Summary.checksum, local_sum.checksum);
-        bcopy(local_sum.last_rec, prev, REC_SIZE);
+        memcpy(prev, local_sum.last_rec, REC_SIZE);
     }
-    bcopy(prev, Summary.last_rec, REC_SIZE); /* get last rec of last summary */
+    memcpy(Summary.last_rec, prev, REC_SIZE); /* get last rec of last summary */
 }
 
 
@@ -264,8 +259,7 @@ int main(int argc, char *argv[])
                    "IN_FILE=%s IN_BUF_SIZE=%d "
                    "REC_SIZE=%d OUT_BUF_SIZE[0]=%d %s",
                    argv[1],
-                   4 * 1024 * 1024,
-                   /* BLK_RECS * REC_SIZE,          /* input buf size */
+                   4 * 1024 * 1024,              /* input buffer size */
                    REC_SIZE,                     /* input record size */
                    sizeof(struct summary),       /* output buf size */
                    sp_argv_to_str(argv + 2, argc - 2));
