@@ -17,7 +17,7 @@ PERF_TESTS=spgzip lookup billing gensort valsort
 PERF_FILES=lookupref.txt lookupin.txt spgzipinput billing_input.txt \
            billing_correct_output.txt sortoutput.txt
 
-CFLAGS=-ansi
+CFLAGS=-Wall
 LIB=libsump.so.1
 
 $(LIB): sump.o
