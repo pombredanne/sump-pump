@@ -30,6 +30,9 @@
 #include <fcntl.h>
 #include <string.h>
 #include <stdlib.h>
+#if !defined(win_nt)
+# include <ctype.h>
+#endif
 
 
 int uppercase_while(sp_task_t t, void *unused)
@@ -58,7 +61,7 @@ int uppercase_justone(sp_task_t t, void *unused)
      * call this pump function again to get next record in the task
      * input (if any).
      */
-    ret = pfunc_get_rec(t, &rec);
+    ret = (int)pfunc_get_rec(t, &rec);
     if (ret <= 0)
         return (pfunc_error(t, "first sp_get_rec() returned rec of size: %d\n", ret));
     for (p = rec; *p != '\0'; p++)
@@ -87,7 +90,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "sp_start() error\n"), exit(1);
 
     if ((ret = sp_wait(sp)) != SP_OK)
-        fprintf(stderr, "sp_wait: %s\n", sp_get_error_string(sp, ret)), exit(1); 
+        fprintf(stderr, "sp_wait: %s\n", sp_get_error_string(sp, ret)), exit(1);
     return (0);
 }
 
