@@ -45,39 +45,48 @@
  *     http://www.ordinal.com/sump.html
  *     http://code.google.com/p/sump-pump/
  */
-#if !defined(__CYGWIN32__)
-# define AIO_CAPABLE
-#endif
 
-#define _GNU_SOURCE
+#if !defined(_WIN32)
+# define _GNU_SOURCE
+# include <pthread.h>
+# include <unistd.h>
+# include <dlfcn.h>
+# include <sched.h>
+# include <sys/mman.h>
+# include <stdint.h>
+# include <ctype.h>
+
+# define DFLT_TXTBIN 0  /* no need to declare text or binary mode on non-Windows */
+# if !defined(__CYGWIN32__)
+#  define AIO_CAPABLE
+#  include <aio.h>
+#  include <sys/types.h>
+#  include <sys/stat.h>
+# endif
+#endif  /* !defined(_WIN32) */
+
 #include "sump.h"
 #include "sumpversion.h"
-#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <dlfcn.h>
-#include <sched.h>
-#if defined(AIO_CAPABLE)
-# include <aio.h>
-#endif
+
 #include <string.h>
 #include <errno.h>
-#include <sys/mman.h>
-#include <stdint.h>
 
 #if defined(SUMP_PUMP_NO_SORT)
 /* define some nsort typedefs to minimize the number of #if's in this file */
-typedef unsigned nsort_t;	/* nsort context identifier */
-typedef int nsort_msg_t;	/* return status & error message numbers */
+typedef unsigned nsort_t;       /* nsort context identifier */
+typedef int nsort_msg_t;        /* return status & error message numbers */
+
 #else
 /* use Nsort include files */
 # include "nsort.h"
 # include "nsorterrno.h"
+
 #endif
 
 /* values for the flags sump pump structure member
@@ -109,9 +118,6 @@ typedef int nsort_msg_t;	/* return status & error message numbers */
 
 static int Page_size = 4096;
 
-typedef uint64_t        u8;
-typedef int64_t         i8;
-
 
 /* state structure for a sump pump instance */
 struct sump
@@ -122,11 +128,11 @@ struct sump
                                         * is executed in parallel by the
                                         * sump pump */
     void                *pump_arg;     /* caller-defined arg to pump func */
-    int                 num_tasks;     /* number of pump tasks */
-    int                 num_threads;   /* number of threads executing the
+    unsigned            num_tasks;     /* number of pump tasks */
+    unsigned            num_threads;   /* number of threads executing the
                                         * pump func */
-    int                 num_in_bufs;   /* number of input buffers */
-    int                 num_outputs;   /* number of sump pump output channels*/
+    unsigned            num_in_bufs;   /* number of input buffers */
+    unsigned            num_outputs;   /* number of sump pump output channels*/
     ssize_t             in_buf_size;   /* input buffer size in bytes */
     struct sump_out     *out;          /* array of output structures, one for
                                         * each output */
@@ -155,24 +161,24 @@ struct sump
     /* number of bytes at end of prev input buffer containing a partial rec */
     size_t              prev_in_buf_ending_rec_partial_bytes;
     pthread_t           *thread;        /* array of sump pump threads */
-    u8                  cnt_in_buf_readable; /* number of input buffers that
+    uint64_t            cnt_in_buf_readable; /* number of input buffers that
                                               * have been filled with input
                                               * data and are available for
                                               * reading by sump pump threads
                                               * executing pump functions */
-    u8                  cnt_in_buf_done; /* number of input buffers
+    uint64_t            cnt_in_buf_done; /* number of input buffers
                                           * that have been read by all
                                           * their readers */
-    u8                  cnt_task_init;  /* number of tasks initialized and
+    uint64_t            cnt_task_init;  /* number of tasks initialized and
                                          * available for the taking by any
                                          * sump pump thread */
-    u8                  cnt_task_begun; /* number of tasks allocated/taken
+    uint64_t            cnt_task_begun; /* number of tasks allocated/taken
                                          * and begun by sump pump threads */
-    u8                  cnt_task_drained; /* number of tasks that have
+    uint64_t            cnt_task_drained; /* number of tasks that have
                                            * been completed and had all
                                            * their output buffer(s)
                                            * completely read/drained. */
-    u8                  cnt_task_done; /* number of done tasks whose
+    uint64_t            cnt_task_done; /* number of done tasks whose
                                         * actual ending position has been
                                         * verified to be the same as their
                                         * expected ending */
@@ -214,7 +220,7 @@ struct task_out
 struct sp_task
 {
     struct sump *sp;            /* the "host" sp_t of this task */
-    size_t      task_number;    /* task number */
+    uint64_t    task_number;    /* task number */
     int         thread_index;   /* id of thread performing this task */
     char        *in_buf;        /* input buffer */
     size_t      in_buf_bytes;   /* number of bytes written into in_buf
@@ -229,12 +235,12 @@ struct sp_task
     size_t      error_buf_size;  /* size of the error message buf */
     int         error_code;      /* pump func generated error code */
     int         sort_error;      /* nsort error code */
-    u8          curr_in_buf_index; /* current input buffer index */
+    uint64_t    curr_in_buf_index; /* current input buffer index */
     char        *begin_rec;      /* pointer to the beginning record */
-    u8          begin_in_buf_index;/* beginning input buffer index */
+    uint64_t    begin_in_buf_index;/* beginning input buffer index */
     /* the following 2 members are set by the thread calling sp_write_input()
      */
-    u8          expected_end_index; /* expected end in buf index */
+    uint64_t    expected_end_index; /* expected end in buf index */
     int         expected_end_offset; /* expected end in buf offset */
     
     char        first_group_rec; /* next record read will be the first
@@ -261,10 +267,10 @@ typedef struct in_buf
                                  * by the reader thread.  these bytes
                                  * will be read out by map task */
     size_t      in_buf_size;    /* size of the in_buf */
-    int         num_readers;    /* number of threads performing
+    unsigned    num_readers;    /* number of threads performing
                                  * tasks that read this buf */
-    int         num_readers_done; /* number of reader threads that are
-                                   * done with this buffer */
+    unsigned    num_readers_done;/* number of reader threads that are
+                                  * done with this buffer */
 } in_buf_t;
 
 /* struct for a link (copy thread) between an output of one sump pump and
@@ -312,7 +318,7 @@ struct sump_out
                                                * currently being read from */
     const char          *file;         /* output file str or NULL if none */
     struct sp_file      *file_sp;      /* output file for this sump pump out */
-    u8                  cnt_task_drained; /* number of tasks that have
+    uint64_t            cnt_task_drained; /* number of tasks that have
                                            * been completed and their
                                            * output buffer for this
                                            * particular output has been
@@ -324,7 +330,7 @@ struct sump_out
 /* sump aio struct */ 
 struct sump_aio
 {
-    u8                  buf_index;      /* sump pump buffer index */
+    uint64_t            buf_index;      /* sump pump buffer index */
     size_t              buf_offset;     /* beginning io offset within buffer */
     char                last_buf_io;    /* boolean indicating last io for buf*/
     off_t               file_offset;    /* file offset */
@@ -360,6 +366,7 @@ static void trace(const char *fmt, ...)
 
     va_start(ap, fmt);
     vfprintf(TraceFp, fmt, ap);
+    va_end(ap);
     fflush(TraceFp);
 }
 
@@ -385,24 +392,12 @@ const char *sp_get_id(void)
 static void die(char *fmt, ...)
 {
     va_list     ap;
-    int         ret;
 
     fprintf(stderr, "sump pump fatal error: ");
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
+    va_end(ap);
     exit(1);
-}
-
-
-/* init_zero_fd - initialize Zero_fd, the file descriptor for /dev/zero.
- */
-static void init_zero_fd()
-{
-    pthread_mutex_lock(&Global_lock);
-    if (Zero_fd <= 0)
-        Zero_fd = open("/dev/zero", O_RDWR);
-    pthread_mutex_unlock(&Global_lock);
-    return;
 }
 
 
@@ -417,17 +412,27 @@ static int start_error(sp_t sp, const char *fmt, ...)
     if (sp->error_code != 0)          /* if prior error */
         return sp->error_code;        /* ignore this one */
     sp->error_code = SP_START_ERROR;
-    
+
     va_start(ap, fmt);
     ret = vsnprintf(sp->error_buf, sp->error_buf_size, fmt, ap);
-    if (ret >= sp->error_buf_size)
+    va_end(ap);
+#if defined(win_nt)
+    if (ret == -1)  /* non-standard vsnprintf overflow indicator on Windows */
+    {
+        va_start(ap, fmt);
+        ret = _vscprintf(fmt, ap);
+        va_end(ap);
+    }
+#endif
+    if ((size_t)ret >= sp->error_buf_size)
     {
         if (sp->error_buf_size != 0)
             free(sp->error_buf);
-        sp->error_buf_size = ret + 1;
+        sp->error_buf_size = (size_t)ret + 1;
         sp->error_buf = (char *)malloc(sp->error_buf_size);
         va_start(ap, fmt);
         vsnprintf(sp->error_buf, sp->error_buf_size, fmt, ap);
+        va_end(ap);
     }
     
     return SP_START_ERROR;
@@ -451,14 +456,24 @@ void sp_raise_error(sp_t sp, int error_code, const char *fmt, ...)
     
     va_start(ap, fmt);
     ret = vsnprintf(sp->error_buf, sp->error_buf_size, fmt, ap);
-    if (ret >= sp->error_buf_size)
+    va_end(ap);
+#if defined(win_nt)
+    if (ret == -1)  /* non-standard vsnprintf overflow indicator on Windows */
+    {
+        va_start(ap, fmt);
+        ret = _vscprintf(fmt, ap);
+        va_end(ap);
+    }
+#endif
+    if ((size_t)ret >= sp->error_buf_size)
     {
         if (sp->error_buf_size != 0)
             free(sp->error_buf);
-        sp->error_buf_size = ret + 1;
+        sp->error_buf_size = (size_t)ret + 1;
         sp->error_buf = (char *)malloc(sp->error_buf_size);
         va_start(ap, fmt);
         vsnprintf(sp->error_buf, sp->error_buf_size, fmt, ap);
+        va_end(ap);
     }
     /* Wake up all possible waiting threads for the sump pump.
      * Some of the below pthread_cond_broadcasts could just be signals.
@@ -473,6 +488,29 @@ void sp_raise_error(sp_t sp, int error_code, const char *fmt, ...)
     pthread_cond_broadcast(&sp->task_output_empty_cond); /* mult sp threads */
     pthread_mutex_unlock(&sp->sump_mtx);
 }
+
+
+#if defined(win_nt)
+
+# include "sump_win.c"
+# define open _open
+# define read _read
+# define write _write
+
+#else
+
+/* init_zero_fd - initialize Zero_fd, the file descriptor for /dev/zero.
+ */
+static void init_zero_fd()
+{
+    pthread_mutex_lock(&Global_lock);
+    if (Zero_fd <= 0)
+        Zero_fd = open("/dev/zero", O_RDWR);
+    pthread_mutex_unlock(&Global_lock);
+    return;
+}
+
+#endif
 
 
 #if !defined(SUMP_PUMP_NO_SORT)
@@ -496,30 +534,50 @@ const char *(*Nsort_get_stats)(nsort_t *ctxp);
 char *(*Nsort_message)(nsort_t *ctxp);
 char *(*Nsort_version)(void);
 
+typedef nsort_msg_t (*declare_function_t)(char *name, nsort_compare_t func, void *arg);
+typedef nsort_msg_t (*define_t)(const char *, unsigned, nsort_callback_t *, nsort_t *ctxp);
+typedef nsort_msg_t (*merge_define_t)(const char *def, unsigned options, nsort_error_callback_t *callbacks, int merge_width, nsort_merge_callback_t *merge_input, nsort_t *ctxp);
+typedef nsort_msg_t (*release_recs_t)(void *buf, size_t size, nsort_t *ctxp);
+typedef nsort_msg_t (*release_end_t)(nsort_t *ctxp);
+typedef nsort_msg_t (*return_recs_t)(void *buf, size_t *size, nsort_t *ctxp);
+typedef nsort_msg_t (*print_stats_t)(nsort_t *ctxp, FILE *fp);
+typedef const char  *(*get_stats_t)(nsort_t *ctxp);
+typedef char        *(*message_t)(nsort_t *ctxp);
+typedef nsort_msg_t (*end_t)(nsort_t *ctxp);
+typedef char        *(*version_t)(void);
+
 
 /* get_nsort_syms - internal routine to dynamically link to nsort library
  */
 static int get_nsort_syms()
 {
+# if defined(win_nt)
+#  define dlsym(handle, name)   GetProcAddress((handle), (name))
+    HANDLE      syms;
+
+    if ((syms = LoadLibrary("libnsort.dll")) == NULL)
+        return (-1);
+# else
     void        *syms;
-    
+
     if ((syms = dlopen("libnsort.so", RTLD_GLOBAL | RTLD_LAZY)) == NULL)
         return (-1);
-    if ((Nsort_define = dlsym(syms, "nsort_define")) == NULL)
+# endif
+    if ((Nsort_define = (define_t)dlsym(syms, "nsort_define")) == NULL)
         return (-2);
-    if ((Nsort_release_recs = dlsym(syms, "nsort_release_recs")) == NULL)
+    if ((Nsort_release_recs = (release_recs_t)dlsym(syms, "nsort_release_recs")) == NULL)
         return (-2);
-    if ((Nsort_release_end = dlsym(syms, "nsort_release_end")) == NULL)
+    if ((Nsort_release_end = (release_end_t)dlsym(syms, "nsort_release_end")) == NULL)
         return (-2);
-    if ((Nsort_return_recs = dlsym(syms, "nsort_return_recs")) == NULL)
+    if ((Nsort_return_recs = (return_recs_t)dlsym(syms, "nsort_return_recs")) == NULL)
         return (-2);
-    if ((Nsort_end = dlsym(syms, "nsort_end")) == NULL)
+    if ((Nsort_end = (end_t)dlsym(syms, "nsort_end")) == NULL)
         return (-2);
-    if ((Nsort_get_stats = dlsym(syms, "nsort_get_stats")) == NULL)
+    if ((Nsort_get_stats = (get_stats_t)dlsym(syms, "nsort_get_stats")) == NULL)
         return (-2);
-    if ((Nsort_message = dlsym(syms, "nsort_message")) == NULL)
+    if ((Nsort_message = (message_t)dlsym(syms, "nsort_message")) == NULL)
         return (-2);
-    if ((Nsort_version = dlsym(syms, "nsort_version")) == NULL)
+    if ((Nsort_version = (version_t)dlsym(syms, "nsort_version")) == NULL)
         return (-2);
     return (0);
 }
@@ -532,9 +590,13 @@ static int link_in_nsort()
 {
     int ret;
     
+# if !defined(win_nt)
     pthread_mutex_lock(&Global_lock);
+# endif
     ret = Nsort_define == NULL ? get_nsort_syms() : 0;
+# if !defined(win_nt)
     pthread_mutex_unlock(&Global_lock);
+# endif
     return (ret);
 }    
 
@@ -596,6 +658,9 @@ int sp_start_sort(sp_t *caller_sp,
     char        *def;
     char        thread_drctv[30];
     char        *p;
+# if defined(win_nt)
+    SYSTEM_INFO si;
+# endif
 
     *caller_sp = NULL;  /* assume the worst for now */
     sp = (sp_t)calloc(1, sizeof(struct sump));
@@ -607,7 +672,12 @@ int sp_start_sort(sp_t *caller_sp,
         return (SP_MEM_ALLOC_ERROR);
     *caller_sp = sp;  /* allow access to error_buf even if failure */
     /* fill in default parameters */
+# if defined(win_nt)
+    GetSystemInfo(&si);
+    sp->num_threads = si.dwNumberOfProcessors;
+# else
     sp->num_threads = sysconf(_SC_NPROCESSORS_ONLN);
+# endif
     sprintf(thread_drctv, "-threads=%d ", sp->num_threads);
     if (sp->num_outputs > 32)
         sp->num_outputs = 32;
@@ -631,11 +701,17 @@ int sp_start_sort(sp_t *caller_sp,
         size_t  def_len;
         
         va_start(ap, def_fmt);
+#if defined(win_nt)
+        def_len = _vscprintf(def_fmt, ap);
+#else
         def_len = vsnprintf(NULL, 0, def_fmt, ap);
+#endif
+        va_end(ap);
         def = (char *)calloc(def_len + 1, 1);
         va_start(ap, def_fmt);
         if (vsnprintf(def, def_len + 1, def_fmt, ap) != def_len)
             die("sp_start_sort: vnsprintf failed to return %d\n", def_len);
+        va_end(ap);
     }
     else
         def = "";
@@ -696,7 +772,7 @@ int sp_start_sort(sp_t *caller_sp,
         sp->error_code = SP_SORT_DEF_ERROR;
         if (msg == NULL)
             msg = "No Nsort error message";
-        strncpy(sp->error_buf, msg, sp->error_buf_size);
+        strncpy(sp->error_buf, msg, sp->error_buf_size - 1);
         sp->error_buf[sp->error_buf_size - 1] = '\0';  /* handle overflow */
         sp->sort_state = SORT_DONE;
         return (SP_SORT_DEF_ERROR);
@@ -779,7 +855,7 @@ const char *sp_get_nsort_version(void)
  */
 static void *file_reader_test(void *arg)
 {
-    size_t              size;
+    int                 size;
     char                *read_buf;
     sp_file_t           sp_src = (sp_file_t)arg;
     sp_t                sp = sp_src->sp;
@@ -792,7 +868,7 @@ static void *file_reader_test(void *arg)
     /* keep looping until there is no additional input */
     for (;;)
     {
-        size = read(sp_src->fd, read_buf, sp_src->transfer_size);
+        size = read(sp_src->fd, read_buf, (unsigned int)sp_src->transfer_size);
         if (size < 0)
         {
             sp_raise_error(sp, SP_FILE_READ_ERROR,
@@ -818,7 +894,7 @@ static void *file_reader_buffered(void *arg)
 {
     size_t              size;
     size_t              request;
-    u8                  index;
+    uint64_t            index;
     char                *read_buf;
     int                 eof;
     sp_file_t           sp_src = (sp_file_t)arg;
@@ -830,7 +906,7 @@ static void *file_reader_buffered(void *arg)
     {
         if (sp_get_in_buf(sp, index, (void **)&read_buf, &request) != SP_OK)
             break;
-        size = read(sp_src->fd, read_buf, request);
+        size = read(sp_src->fd, read_buf, (unsigned int)request);
         if (size < 0)
         {
             sp_raise_error(sp, SP_FILE_READ_ERROR,
@@ -878,7 +954,7 @@ static void *file_writer_buffered(void *arg)
             break;
         }
         TRACE("writer: writing %d bytes\n", size);  
-        if (write(fd, buf, size) != size)
+        if (write(fd, buf, (unsigned int)size) != size)
         {
             sp_raise_error(sp, SP_FILE_WRITE_ERROR,
                            "%s: write() failure: %s\n",
@@ -902,8 +978,8 @@ static void *file_reader_direct(void *arg)
 {
     ssize_t             size;
     ssize_t             request;
-    ssize_t             in_buf_size;
-    u8                  aios_started;
+    size_t              in_buf_size;
+    uint64_t            aios_started;
     off_t               file_read_offset = 0;
     struct sump_aio     *spaio;
     struct aiocb        *aio;
@@ -915,8 +991,7 @@ static void *file_reader_direct(void *arg)
     int                 aio_count;
     int                 start;
     int                 done;
-    int                 i;
-    u8                  next_in_buf;
+    uint64_t            next_in_buf;
     size_t              next_buf_offset;
     char                *buf;
     int                 put_result;
@@ -936,7 +1011,7 @@ static void *file_reader_direct(void *arg)
         aio = &spaio[start].aio;
         aio->aio_fildes = sp_src->fd;
         /* if getting of the buffer fails. */
-        if (sp_get_in_buf(sp, next_in_buf, &buf, &in_buf_size) != SP_OK)
+        if (sp_get_in_buf(sp, next_in_buf, (void **)&buf, &in_buf_size) != SP_OK)
         {
             sp_raise_error(sp, SP_FILE_READ_ERROR,
                            "sp_get_in_buf() failure with in_buf %lld\n",
@@ -1053,8 +1128,8 @@ static void *file_writer_direct(void *arg)
     sp_t                sp = sp_dst->sp;
     int                 out_index = sp_dst->out_index;
     ssize_t             request;
-    u8                  aios_started;
-    u8                  aios_completed;
+    uint64_t            aios_started;
+    uint64_t            aios_completed;
     off_t               file_write_offset = 0;
     struct sump_aio     *spaio;
     struct aiocb        *aio;
@@ -1076,6 +1151,17 @@ static void *file_writer_direct(void *arg)
 
     TRACE("file_writer_direct: allocating %d buffer bytes\n", sp_dst->transfer_size);
     size = sp_dst->transfer_size * aio_count;
+#if defined(win_nt)
+    buf = VirtualAlloc(NULL, size, MEM_COMMIT, PAGE_READWRITE);
+    if (buf == NULL)
+    {
+        sp_raise_error(sp, SP_MEM_ALLOC_ERROR,
+                       "VirtualAlloc() failure: %s\n",
+                       nt_strerror(GetLastError(), err_buf, sizeof(err_buf)));
+        sp_dst->error_code = SP_MEM_ALLOC_ERROR;
+        return NULL;
+    }
+#else
     init_zero_fd();
     buf = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE, Zero_fd, 0);
     if (buf == MAP_FAILED)
@@ -1084,8 +1170,9 @@ static void *file_writer_direct(void *arg)
                        "mmap() failure: %s\n",
                        strerror_r(errno, err_buf, sizeof(err_buf)));
         sp_dst->error_code = SP_MEM_ALLOC_ERROR;
-        return;
+        return NULL;
     }
+#endif
 
     aios_completed = 0;
     for (aios_started = 0; ; )
@@ -1204,7 +1291,7 @@ static void *file_writer_direct(void *arg)
         /* close file descriptor opened with O_DIRECT */
         close(sp_dst->fd);
         /* reopen file without O_DIRECT */
-        if ((fd = open(sp_dst->fname, O_WRONLY, 0777)) < 0)
+        if ((fd = open(sp_dst->fname, O_WRONLY | DFLT_TXTBIN, 0777)) < 0)
         {
             sp_dst->error_code = SP_FILE_WRITE_ERROR;
             sp_raise_error(sp, SP_FILE_WRITE_ERROR,
@@ -1230,7 +1317,7 @@ static void *file_writer_direct(void *arg)
         }
     }
     TRACE("file_writer_direct done: %d\n", sp_dst->error_code);
-    return;
+    return NULL;
 }
 
 #endif
@@ -1241,7 +1328,7 @@ static void *file_writer_direct(void *arg)
  */
 int sp_wait(sp_t sp)
 {
-    int         i;
+    unsigned    i;
     int         ret;
 
     if (sp->flags & SP_SORT)
@@ -1269,19 +1356,24 @@ int sp_wait(sp_t sp)
         pthread_mutex_unlock(&sp->sump_mtx);
         return (sp->error_code);
     }
-    else /* non-sort sump pump */
+    else /* normal (non-sort) sump pump */
     {
+        TRACE("waiting for input file reader\n");
         if (sp->in_file_sp != NULL)
         {
             if ((ret = sp_file_wait(sp->in_file_sp)) != SP_OK)
                 return (sp->error_code == SP_OK ? ret : sp->error_code);
         }
         for (i = 0; i < sp->num_threads; i++)
+        {
+            TRACE("waiting for pump thread %d\n", i);
             pthread_join(sp->thread[i], NULL);
+        }
         for (i = 0; i < sp->num_outputs; i++)
         {
             if (sp->out[i].file_sp != NULL)
             {
+                TRACE("waiting for output %d thread\n", i);
                 if ((ret = sp_file_wait(sp->out[i].file_sp)) != SP_OK)
                     return (sp->error_code == SP_OK ? ret : sp->error_code);
             }
@@ -1297,33 +1389,42 @@ int sp_wait(sp_t sp)
 static void syntax_error(sp_t sp, char *p, char *err_msg)
 {
     int         ret;
+    const char  *fmt = "syntax error: %s at: \"%s\"\n";
 
     if (sp->error_code != 0)          /* if prior error */
         return;                       /* ignore this one */
     sp->error_code = SP_SYNTAX_ERROR;
 
-    ret = snprintf(sp->error_buf, sp->error_buf_size,
-                   "syntax error: %s at: \"%s\"\n", err_msg, p);
-    if (ret >= sp->error_buf_size)
+#if defined(win_nt)
+    ret = _snprintf(sp->error_buf, sp->error_buf_size, fmt, err_msg, p);
+    if (ret == -1)
+        ret = _scprintf(fmt, err_msg, p);
+#else
+    ret = snprintf(sp->error_buf, sp->error_buf_size, fmt, err_msg, p);
+#endif
+    if ((size_t)ret >= sp->error_buf_size)
     {
         if (sp->error_buf_size != 0)
             free(sp->error_buf);
-        sp->error_buf_size = ret + 1;
+        sp->error_buf_size = (size_t)ret + 1;
         sp->error_buf = (char *)malloc(sp->error_buf_size);
-        snprintf(sp->error_buf, sp->error_buf_size,
-                 "syntax error: %s at: \"%s\"\n", err_msg, p);
+#if defined(win_nt)
+        _snprintf(sp->error_buf, sp->error_buf_size, fmt, err_msg, p);
+#else
+        snprintf(sp->error_buf, sp->error_buf_size, fmt, err_msg, p);
+#endif
     }
     
     return;
 }
 
 
-/* get_numeric_arg - internal routine to convert an ascii number to i8
+/* get_numeric_arg - internal routine to convert an ascii number to int64_t
  */
-static i8 get_numeric_arg(sp_t sp, char **caller_p)
+static int64_t get_numeric_arg(sp_t sp, char **caller_p)
 {
     int         negative = 0;
-    i8          result = 0;
+    int64_t     result = 0;
     char        *p = *caller_p;
 
     if (*p == '-')
@@ -1348,10 +1449,10 @@ static i8 get_numeric_arg(sp_t sp, char **caller_p)
 
 /* get_scale - internal routine to convert 'k', 'm' of 'g' to a numeric value
  */
-static i8 get_scale(char **caller_p)
+static int64_t get_scale(char **caller_p)
 {
     char        *p = *caller_p;
-    i8          factor = 1;
+    int64_t     factor = 1;
 
     if (*p == 'k' || *p == 'K')
         factor = 1024;
@@ -1370,7 +1471,6 @@ static i8 get_scale(char **caller_p)
  */
 void get_file_mods(sp_file_t spf, char *mods)
 {
-    struct stat statbuf;
     char        *p = mods;
     char        *kw;
 
@@ -1399,7 +1499,7 @@ void get_file_mods(sp_file_t spf, char *mods)
                 return;
             }
             p++;
-            spf->aio_count = get_numeric_arg(spf->sp, &p);
+            spf->aio_count = (int)get_numeric_arg(spf->sp, &p);
         }
         else if ((kw = "TRANSFER", !strncasecmp(p, kw, strlen(kw))) ||
                  (kw = "TRANS", !strncasecmp(p, kw, strlen(kw))))
@@ -1411,8 +1511,8 @@ void get_file_mods(sp_file_t spf, char *mods)
                 return;
             }
             p++;
-            spf->transfer_size = get_numeric_arg(spf->sp, &p);
-            spf->transfer_size *= get_scale(&p);
+            spf->transfer_size = (size_t)get_numeric_arg(spf->sp, &p);
+            spf->transfer_size *= (size_t)get_scale(&p);
         }
         else
         {
@@ -1438,8 +1538,8 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods, unsigned flags)
     sp_src->sp = sp;
 
     comma_char = strchr(fname_mods, ',');
-    fname_len =
-        comma_char == NULL ? strlen(fname_mods) : comma_char - fname_mods;
+    fname_len = (int)
+        (comma_char == NULL ? strlen(fname_mods) : comma_char - fname_mods);
     sp_src->fname = (char *)calloc(1, fname_len + 1);
     memcpy(sp_src->fname, fname_mods, fname_len);
     sp_src->fname[fname_len] = '\0';
@@ -1473,7 +1573,7 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods, unsigned flags)
         sp_src->fd = 0;
     else
     {
-        sp_src->fd = open(sp_src->fname, flags);
+        sp_src->fd = open(sp_src->fname, flags | DFLT_TXTBIN);
         if (sp_src->fd < 0)
             return (NULL);
     }
@@ -1501,8 +1601,8 @@ sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods, 
     sp_dst->sp = sp;
 
     comma_char = strchr(fname_mods, ',');
-    fname_len =
-        comma_char == NULL ? strlen(fname_mods) : comma_char - fname_mods;
+    fname_len = (int)
+        (comma_char == NULL ? strlen(fname_mods) : comma_char - fname_mods);
     sp_dst->fname = (char *)calloc(1, fname_len + 1);
     memcpy(sp_dst->fname, fname_mods, fname_len);
     sp_dst->fname[fname_len] = '\0';
@@ -1536,7 +1636,7 @@ sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods, 
         sp_dst->fd = 2;
     else
     {
-        sp_dst->fd = open(sp_dst->fname, flags, 0777);
+        sp_dst->fd = open(sp_dst->fname, flags | DFLT_TXTBIN, 0777);
         if (sp_dst->fd < 0)
             return (NULL);
     }
@@ -1623,7 +1723,7 @@ static void check_task_done(sp_t sp)
 static sp_task_t init_new_task(sp_t sp, in_buf_t *ib, char *curr_rec)
 {            
     sp_task_t           t;
-    int                 i;
+    unsigned            i;
 
     t = &sp->task[sp->cnt_task_init % sp->num_tasks];
     t->task_number = sp->cnt_task_init;
@@ -1702,7 +1802,6 @@ static void flush_in_buf(sp_t sp, size_t buf_bytes, int eof)
     sp_task_t           t;
     char                *curr_rec;
     char                *p;
-    int                 i;
         
     /* get ready to release in_buf to pump threads executing pump funcs */
     /* initially, no readers (there will be at least one) */
@@ -1892,7 +1991,7 @@ static void flush_in_buf(sp_t sp, size_t buf_bytes, int eof)
                  * and the offset is the end.
                  */
                 t->expected_end_index = sp->cnt_in_buf_readable - 1;
-                t->expected_end_offset = curr_rec - ib->in_buf;
+                t->expected_end_offset = (int)(curr_rec - ib->in_buf);
             }
 
             /* Note: it is possible that at this point the previous
@@ -1942,7 +2041,7 @@ static void flush_in_buf(sp_t sp, size_t buf_bytes, int eof)
              * and the offset is.
              */
             t->expected_end_index = sp->cnt_in_buf_readable - 1;
-            t->expected_end_offset = curr_rec - ib->in_buf;
+            t->expected_end_offset = (int)(curr_rec - ib->in_buf);
 
             /* Note: it is possible that at this point the previous
              * task has already completed.  This is why tasks should
@@ -2108,7 +2207,7 @@ ssize_t sp_write_input(sp_t sp, void *buf, ssize_t size)
 /* sp_get_in_buf - get a pointer to an input buffer that an external
  *                    thread can fill with input data.
  */
-int sp_get_in_buf(sp_t sp, u8 buf_index, void **buf, size_t *size)
+int sp_get_in_buf(sp_t sp, uint64_t buf_index, void **buf, size_t *size)
 {
     in_buf_t    *ib;
     
@@ -2154,7 +2253,7 @@ int sp_get_in_buf(sp_t sp, u8 buf_index, void **buf, size_t *size)
  *                          This function should only be used by first
  *                          calling sp_get_in_buf().
  */
-int sp_put_in_buf_bytes(sp_t sp, u8 buf_index, size_t size, int eof)
+int sp_put_in_buf_bytes(sp_t sp, uint64_t buf_index, size_t size, int eof)
 {
     if (sp->flags & SP_SORT)
         return (SP_SORT_INCOMPATIBLE);
@@ -2197,7 +2296,7 @@ int pfunc_get_thread_index(sp_task_t t)
  *                           increases with each subsequent task
  *                           issued/started by the sump pump.
  */
-size_t pfunc_get_task_number(sp_task_t t)
+uint64_t pfunc_get_task_number(sp_task_t t)
 {
     return (t->task_number);
 }
@@ -2233,7 +2332,7 @@ size_t pfunc_write(sp_task_t t, unsigned out_index, void *buf, size_t size)
         copy_bytes = out->size - out->bytes_copied;
         if (copy_bytes)
         {
-            bcopy(src, out->buf + out->bytes_copied, copy_bytes);
+            memmove(out->buf + out->bytes_copied, src, copy_bytes);
             src += copy_bytes;
             bytes_left -= copy_bytes;
             out->bytes_copied += copy_bytes;
@@ -2250,7 +2349,7 @@ size_t pfunc_write(sp_task_t t, unsigned out_index, void *buf, size_t size)
             return (-1);
     }
     /* copy new record into buffer */
-    bcopy(src, out->buf + out->bytes_copied, bytes_left);
+    memmove(out->buf + out->bytes_copied, src, bytes_left);
     out->bytes_copied += bytes_left;
     return (size);
 }
@@ -2313,7 +2412,6 @@ static void done_reading_in_buf(sp_task_t t, int move_to_next_in_buf)
 static void ready_in_buf(sp_task_t t)
 {
     in_buf_t     *ib;
-    int         len;
     sp_t        sp = t->sp;
 
     pthread_mutex_lock(&sp->sump_mtx);
@@ -2418,7 +2516,6 @@ size_t pfunc_get_rec(sp_task_t t, void *ptr_to_rec_ptr)
     size_t      src_size;
     size_t      trans_size;
     size_t      delim_size = 0;
-    in_buf_t    *ib;
     sp_t        sp = t->sp;
     int         new_key_group_beginning = FALSE;
 
@@ -2546,7 +2643,7 @@ size_t pfunc_get_rec(sp_task_t t, void *ptr_to_rec_ptr)
             t->rec_buf_size = new_size;
             buf = t->rec_buf;
         }
-        bcopy(rec, (char *)buf + len, trans_size);
+        memmove((char *)buf + len, rec, trans_size);
         len += trans_size;
         if (next_rec != NULL)  /* if we found the newline delimiter */
         {
@@ -2654,21 +2751,31 @@ int pfunc_put_out_buf_bytes(sp_task_t t, unsigned out_index, size_t size)
 int pfunc_printf(sp_task_t t, unsigned out_index, const char *fmt, ...)
 {
     va_list     ap;
-    int         ret;
+    ssize_t     ret;
 
     va_start(ap, fmt);
     ret = vsnprintf(t->temp_buf, t->temp_buf_size, fmt, ap);
-    if (ret >= t->temp_buf_size)
+    va_end(ap);
+#if defined(win_nt)
+    if (ret == -1)  /* non-standard vsnprintf overflow indicator on Windows */
+    {
+        va_start(ap, fmt);
+        ret = _vscprintf(fmt, ap);
+        va_end(ap);
+    }
+#endif
+    if ((size_t)ret >= t->temp_buf_size)
     {
         /* temp buf wasn't big enough.  enlarge it and redo */
         if (t->temp_buf_size != 0)
             free(t->temp_buf);
-        va_start(ap, fmt);
         t->temp_buf_size = ret + 10;
         t->temp_buf = (char *)malloc(t->temp_buf_size);
+        va_start(ap, fmt);
         ret = vsnprintf(t->temp_buf, t->temp_buf_size, fmt, ap);
+        va_end(ap);
     }
-    return (pfunc_write(t, out_index, t->temp_buf, ret));
+    return ((int)pfunc_write(t, out_index, t->temp_buf, ret));
 }
 
 
@@ -2685,14 +2792,24 @@ int pfunc_error(sp_task_t t, const char *fmt, ...)
     
     va_start(ap, fmt);
     ret = vsnprintf(t->error_buf, t->error_buf_size, fmt, ap);
-    if (ret >= t->error_buf_size)
+    va_end(ap);
+#if defined(win_nt)
+    if (ret == -1)  /* non-standard vsnprintf overflow indicator on Windows */
+    {
+        va_start(ap, fmt);
+        ret = _vscprintf(fmt, ap);
+        va_end(ap);
+    }
+#endif
+    if ((size_t)ret >= t->error_buf_size)
     {
         if (t->error_buf_size != 0)
             free(t->error_buf);
-        t->error_buf_size = ret + 1;
+        t->error_buf_size = (size_t)ret + 1;
         t->error_buf = (char *)malloc(t->error_buf_size);
         va_start(ap, fmt);
         vsnprintf(t->error_buf, t->error_buf_size, fmt, ap);
+        va_end(ap);
     }
     pthread_mutex_lock(&sp->sump_mtx);
     pthread_cond_broadcast(&sp->in_buf_readable_cond); /* multiple sp threads*/
@@ -2711,15 +2828,17 @@ int pfunc_error(sp_task_t t, const char *fmt, ...)
  */
 static void *pump_thread_main(void *arg)
 {
-    int                 size;
     sp_task_t           t;
-    int                 thread_index;
+    unsigned            thread_index;
     sp_t                sp = (sp_t)arg;
     int                 ret;
-    int                 j;
 
     for (thread_index = 0; thread_index < sp->num_threads; thread_index++)
+#if defined(win_nt)
+        if (sp->thread[thread_index].id == GetCurrentThreadId())
+#else
         if (sp->thread[thread_index] == pthread_self())
+#endif
             break;
     TRACE("pump thread %d starting\n", thread_index);
     for (;;)
@@ -2741,13 +2860,12 @@ static void *pump_thread_main(void *arg)
             break;
         }
         t = &sp->task[sp->cnt_task_begun % sp->num_tasks];
-        size = t->in_buf_bytes;
         sp->cnt_task_begun++;
         t->thread_index = thread_index;
         pthread_mutex_unlock(&sp->sump_mtx);
 
-        TRACE("pump%d: calling pump func with  %d input bytes\n",
-              thread_index, size);
+        TRACE("pump%d: calling pump func with %d input bytes\n",
+              thread_index, (int)t->in_buf_bytes);
 #if 0
         if (ExtraProcess)
         {
@@ -2919,7 +3037,7 @@ ssize_t sp_read_output(sp_t sp, unsigned index, void *buf, ssize_t size)
             {
                 /* we will fill the caller's buffer completely.
                  */
-                bcopy(trans_src, trans_dst, dst_remaining);
+                memmove(trans_dst, trans_src, dst_remaining);
                 bytes_returned += dst_remaining;
                 sp->out[0].partial_bytes_copied += dst_remaining;
                 break;
@@ -2928,7 +3046,7 @@ ssize_t sp_read_output(sp_t sp, unsigned index, void *buf, ssize_t size)
             /* the sort temp buffer will be completely copied out,
              * and we still need more.
              */
-            bcopy(trans_src, trans_dst, src_remaining);
+            memmove(trans_dst, trans_src, src_remaining);
             bytes_returned += src_remaining;
             /* indicate sort temp output buffer needes to be refilled */
             sp->out[0].partial_bytes_copied = 0;
@@ -3014,7 +3132,7 @@ ssize_t sp_read_output(sp_t sp, unsigned index, void *buf, ssize_t size)
             /* we will fill the output buffer and still leave some bytes
              * in the sump pump task's output buffer.
              */
-            bcopy(trans_src, trans_dst, dst_remaining);
+            memmove(trans_dst, trans_src, dst_remaining);
             bytes_returned += dst_remaining;
             sp->out[index].partial_bytes_copied += dst_remaining;
             break;
@@ -3022,7 +3140,7 @@ ssize_t sp_read_output(sp_t sp, unsigned index, void *buf, ssize_t size)
 
         /* the sump pump task's output buffer will be completely copied out.
          */
-        bcopy(trans_src, trans_dst, src_remaining);
+        memmove(trans_dst, trans_src, src_remaining);
         bytes_returned += src_remaining;
         /* indicate new sump pump task output is needed */
         sp->out[index].partial_bytes_copied = 0;  
@@ -3143,7 +3261,7 @@ static int get_output_index(sp_t sp, char **caller_p)
         return 0;
     }
     index = (int)get_numeric_arg(sp, &p);
-    if (index < 0 || index >= sp->num_outputs)
+    if (index < 0 || (unsigned)index >= sp->num_outputs)
     {
         syntax_error(sp, p,
                      "output index is greater than the number of outputs");
@@ -3201,7 +3319,7 @@ const char *sp_argv_to_str(char *argv[], int argc)
 
     n_chars = 1;      /* '\0' */
     for (i = 0; i < argc; i++)
-        n_chars += 1 + strlen(argv[i]);   /* ' ' + argv[i] */
+        n_chars += 1 + (int)strlen(argv[i]);   /* ' ' + argv[i] */
     str = (char *)calloc(sizeof(char), n_chars + 1);
     strcpy(str, argc == 0 ? "" : argv[0]);
     for (i = 1; i < argc; i++)
@@ -3272,8 +3390,8 @@ int sp_start(sp_t *caller_sp,
 {
     sp_t                sp;
     char                *s;
-    int                 i;
-    int                 j;
+    unsigned            i;
+    unsigned            j;
     int                 ret;
     char                *p;
     char                *kw;
@@ -3311,7 +3429,16 @@ int sp_start(sp_t *caller_sp,
     
     /* fill in default parameters */
     sp->pump_arg = NULL;
+#if defined(win_nt)
+    {
+        SYSTEM_INFO si;
+
+        GetSystemInfo(&si);
+        sp->num_threads = si.dwNumberOfProcessors;
+    }
+#else
     sp->num_threads = sysconf(_SC_NPROCESSORS_ONLN);
+#endif
     sp->num_in_bufs = 3 * sp->num_threads;
     sp->num_tasks = 3 * sp->num_threads;
     sp->in_buf_size = (1 << 18);
@@ -3330,7 +3457,12 @@ int sp_start(sp_t *caller_sp,
         size_t  args_size;
         
         va_start(ap, arg_fmt);
+#if defined(win_nt)
+        args_size = _vscprintf(arg_fmt, ap);
+#else
         args_size = vsnprintf(NULL, 0, arg_fmt, ap);
+#endif
+        va_end(ap);
         args = (char *)calloc(args_size + 1, 1);
         va_start(ap, arg_fmt);
         if (vsnprintf(args, args_size + 1, arg_fmt, ap) != args_size)
@@ -3339,6 +3471,8 @@ int sp_start(sp_t *caller_sp,
                         "vnsprintf failed to return %d\n", args_size);
             return (sp->error_code);
         }
+        va_end(ap);
+        TRACE("sp_start args: '%s'\n", args);
         p = args;
         for (;;)
         {
@@ -3378,8 +3512,8 @@ int sp_start(sp_t *caller_sp,
             else if (kw = "IN_BUF_SIZE=", !strncasecmp(p, kw, strlen(kw)))
             {
                 p += strlen(kw);
-                sp->in_buf_size = get_numeric_arg(sp, &p);
-                sp->in_buf_size *= get_scale(&p);
+                sp->in_buf_size = (ssize_t)get_numeric_arg(sp, &p);
+                sp->in_buf_size *= (ssize_t)get_scale(&p);
             }
             else if (kw = "IN_FILE=", !strncasecmp(p, kw, strlen(kw)))
             {
@@ -3390,14 +3524,14 @@ int sp_start(sp_t *caller_sp,
             else if (kw = "IN_BUFS=", !strncasecmp(p, kw, strlen(kw)))
             {
                 p += strlen(kw);
-                sp->num_in_bufs = get_numeric_arg(sp, &p);
+                sp->num_in_bufs = (unsigned)get_numeric_arg(sp, &p);
             }
             else if (kw = "OUTPUTS=", !strncasecmp(p, kw, strlen(kw)))
             {
                 unsigned        num_outputs;
                 
                 p += strlen(kw);
-                num_outputs = get_numeric_arg(sp, &p);
+                num_outputs = (unsigned)get_numeric_arg(sp, &p);
                 if (num_outputs > sp->num_outputs)
                 {
                     sp->out = (struct sump_out *)
@@ -3407,31 +3541,34 @@ int sp_start(sp_t *caller_sp,
                         start_error(sp, "set_num_outputs, realloc() failed\n");
                         return (sp->error_code);
                     }
+                    for (i = sp->num_outputs; i < num_outputs; i++)
+                    {
+                        memset(sp->out + i, 0, sizeof(struct sump_out));
+                        sp->out[i].buf_size = sp->out[0].buf_size;
+                    }
                 }
-                for (i = sp->num_outputs; i < num_outputs; i++)
-                    sp->out[i].buf_size = sp->out[0].buf_size;
                 sp->num_outputs = num_outputs;
             }
             else if (kw = "TASKS=", !strncasecmp(p, kw, strlen(kw)))
             {
                 p += strlen(kw);
-                sp->num_in_bufs = sp->num_tasks = get_numeric_arg(sp, &p);
+                sp->num_in_bufs = sp->num_tasks = (unsigned)get_numeric_arg(sp, &p);
             }
             else if (kw = "THREADS=", !strncasecmp(p, kw, strlen(kw)))
             {
                 int     num_threads;
                 
                 p += strlen(kw);
-                num_threads = get_numeric_arg(sp, &p);
+                num_threads = (int)get_numeric_arg(sp, &p);
                 if (num_threads > 0)
-                    sp->num_threads = num_threads;
+                    sp->num_threads = (unsigned)num_threads;
             }
             else if (kw = "OUT_BUF_SIZE", !strncasecmp(p, kw, strlen(kw)))
             {
                 p += strlen(kw);
                 index = get_output_index(sp, &p);
                 sp->out[index].buf_size = (int)get_numeric_arg(sp, &p);
-                sp->out[index].buf_size *= get_scale(&p);
+                sp->out[index].buf_size *= (size_t)get_scale(&p);
             }
             else if (kw = "OUT_FILE", !strncasecmp(p, kw, strlen(kw)))
             {
@@ -3454,8 +3591,8 @@ int sp_start(sp_t *caller_sp,
             else if (kw = "RW_TEST_SIZE=", !strncasecmp(p, kw, strlen(kw)))
             {
                 p += strlen(kw);
-                Default_rw_test_size = get_numeric_arg(sp, &p);
-                Default_rw_test_size *= get_scale(&p);
+                Default_rw_test_size = (size_t)get_numeric_arg(sp, &p);
+                Default_rw_test_size *= (size_t)get_scale(&p);
             }
             else if (kw = "WHOLE_BUF", !strncasecmp(p, kw, strlen(kw)))
             {
@@ -3530,12 +3667,19 @@ int sp_start(sp_t *caller_sp,
 
         /* round up buf size to page size multiple */
         buf_size = ((sp->in_buf_size + Page_size - 1) / Page_size) * Page_size;
+#if defined(win_nt)
+        sp->in_buf[i].in_buf = 
+          VirtualAlloc(NULL, buf_size, MEM_COMMIT, PAGE_READWRITE);
+        if (sp->in_buf[i].in_buf == NULL)
+            return (SP_MEM_ALLOC_ERROR);
+#else
         init_zero_fd();
         sp->in_buf[i].in_buf = mmap(NULL, buf_size,
                                     PROT_READ | PROT_WRITE,
                                     MAP_PRIVATE, Zero_fd, 0);
         if (sp->in_buf[i].in_buf == MAP_FAILED)
             return (SP_MEM_ALLOC_ERROR);
+#endif
         sp->in_buf[i].in_buf_size = sp->in_buf_size;
     }
 
@@ -3550,7 +3694,7 @@ int sp_start(sp_t *caller_sp,
     pthread_cond_init(&sp->task_output_empty_cond, NULL);
 
     /* create thread sump threads */
-    sp->thread = (pthread_t *)calloc(sp->num_threads, sizeof(pthread_t *));
+    sp->thread = (pthread_t *)calloc(sp->num_threads, sizeof(pthread_t));
     for (i = 0; i < sp->num_threads; i++)
     {
         ret =
