@@ -63,25 +63,25 @@ void gen_ascii_rec(unsigned char *rec_buf, u16 rand, u16 rec_number)
     /* generate the 10-byte ascii key using mostly the high 64 bits.
      */
     temp = rand.hi8;
-    rec_buf[0] = ' ' + (temp % 95);
+    rec_buf[0] = (unsigned char)(' ' + (temp % 95));
     temp /= 95;
-    rec_buf[1] = ' ' + (temp % 95);
+    rec_buf[1] = (unsigned char)(' ' + (temp % 95));
     temp /= 95;
-    rec_buf[2] = ' ' + (temp % 95);
+    rec_buf[2] = (unsigned char)(' ' + (temp % 95));
     temp /= 95;
-    rec_buf[3] = ' ' + (temp % 95);
+    rec_buf[3] = (unsigned char)(' ' + (temp % 95));
     temp /= 95;
-    rec_buf[4] = ' ' + (temp % 95);
+    rec_buf[4] = (unsigned char)(' ' + (temp % 95));
     temp /= 95;
-    rec_buf[5] = ' ' + (temp % 95);
+    rec_buf[5] = (unsigned char)(' ' + (temp % 95));
     temp /= 95;
-    rec_buf[6] = ' ' + (temp % 95);
+    rec_buf[6] = (unsigned char)(' ' + (temp % 95));
     temp /= 95;
-    rec_buf[7] = ' ' + (temp % 95);
+    rec_buf[7] = (unsigned char)(' ' + (temp % 95));
     temp = rand.lo8;
-    rec_buf[8] = ' ' + (temp % 95);
+    rec_buf[8] = (unsigned char)(' ' + (temp % 95));
     temp /= 95;
-    rec_buf[9] = ' ' + (temp % 95);
+    rec_buf[9] = (unsigned char)(' ' + (temp % 95));
     temp /= 95;
 
     /* add 2 bytes of "break" */
@@ -92,9 +92,11 @@ void gen_ascii_rec(unsigned char *rec_buf, u16 rand, u16 rec_number)
      * as the next 32 bytes of the record.
      */
     for (i = 0; i < 16; i++)
-        rec_buf[12 + i] = HEX_DIGIT((rec_number.hi8 >> (60 - 4 * i)) & 0xF);
+        rec_buf[12 + i] =
+            (unsigned char)(HEX_DIGIT((rec_number.hi8 >> (60 - 4 * i)) & 0xF));
     for (i = 0; i < 16; i++)
-        rec_buf[28 + i] = HEX_DIGIT((rec_number.lo8 >> (60 - 4 * i)) & 0xF);
+        rec_buf[28 + i] =
+            (unsigned char)(HEX_DIGIT((rec_number.lo8 >> (60 - 4 * i)) & 0xF));
 
     /* add 2 bytes of "break" data */
     rec_buf[44] = ' ';
@@ -102,31 +104,31 @@ void gen_ascii_rec(unsigned char *rec_buf, u16 rand, u16 rec_number)
 
     /* add 52 bytes of filler based on low 48 bits of random number */
     rec_buf[46] = rec_buf[47] = rec_buf[48] = rec_buf[49] = 
-        HEX_DIGIT((rand.lo8 >> 48) & 0xF);
+        (unsigned char)(HEX_DIGIT((rand.lo8 >> 48) & 0xF));
     rec_buf[50] = rec_buf[51] = rec_buf[52] = rec_buf[53] = 
-        HEX_DIGIT((rand.lo8 >> 44) & 0xF);
+        (unsigned char)(HEX_DIGIT((rand.lo8 >> 44) & 0xF));
     rec_buf[54] = rec_buf[55] = rec_buf[56] = rec_buf[57] = 
-        HEX_DIGIT((rand.lo8 >> 40) & 0xF);
+        (unsigned char)(HEX_DIGIT((rand.lo8 >> 40) & 0xF));
     rec_buf[58] = rec_buf[59] = rec_buf[60] = rec_buf[61] = 
-        HEX_DIGIT((rand.lo8 >> 36) & 0xF);
+        (unsigned char)(HEX_DIGIT((rand.lo8 >> 36) & 0xF));
     rec_buf[62] = rec_buf[63] = rec_buf[64] = rec_buf[65] = 
-        HEX_DIGIT((rand.lo8 >> 32) & 0xF);
+        (unsigned char)(HEX_DIGIT((rand.lo8 >> 32) & 0xF));
     rec_buf[66] = rec_buf[67] = rec_buf[68] = rec_buf[69] = 
-        HEX_DIGIT((rand.lo8 >> 28) & 0xF);
+        (unsigned char)(HEX_DIGIT((rand.lo8 >> 28) & 0xF));
     rec_buf[70] = rec_buf[71] = rec_buf[72] = rec_buf[73] = 
-        HEX_DIGIT((rand.lo8 >> 24) & 0xF);
+        (unsigned char)(HEX_DIGIT((rand.lo8 >> 24) & 0xF));
     rec_buf[74] = rec_buf[75] = rec_buf[76] = rec_buf[77] = 
-        HEX_DIGIT((rand.lo8 >> 20) & 0xF);
+        (unsigned char)(HEX_DIGIT((rand.lo8 >> 20) & 0xF));
     rec_buf[78] = rec_buf[79] = rec_buf[80] = rec_buf[81] = 
-        HEX_DIGIT((rand.lo8 >> 16) & 0xF);
+        (unsigned char)(HEX_DIGIT((rand.lo8 >> 16) & 0xF));
     rec_buf[82] = rec_buf[83] = rec_buf[84] = rec_buf[85] = 
-        HEX_DIGIT((rand.lo8 >> 12) & 0xF);
+        (unsigned char)(HEX_DIGIT((rand.lo8 >> 12) & 0xF));
     rec_buf[86] = rec_buf[87] = rec_buf[88] = rec_buf[89] = 
-        HEX_DIGIT((rand.lo8 >>  8) & 0xF);
+        (unsigned char)(HEX_DIGIT((rand.lo8 >>  8) & 0xF));
     rec_buf[90] = rec_buf[91] = rec_buf[92] = rec_buf[93] = 
-        HEX_DIGIT((rand.lo8 >>  4) & 0xF);
+        (unsigned char)(HEX_DIGIT((rand.lo8 >>  4) & 0xF));
     rec_buf[94] = rec_buf[95] = rec_buf[96] = rec_buf[97] = 
-        HEX_DIGIT((rand.lo8 >>  0) & 0xF);
+        (unsigned char)(HEX_DIGIT((rand.lo8 >>  0) & 0xF));
 
     /* add 2 bytes of "break" data */
     rec_buf[98] = '\r'; /* nice for Windows */
@@ -151,7 +153,7 @@ int gen_block(sp_task_t t, void *unused)
     u16                 temp16 = {0LL, 0LL};
     u16                 sum16 = {0LL, 0LL};
     u16                 rec_number;
-    char                rec_buf[100];
+    unsigned char       rec_buf[100];
 
     /* read instruction from the thread's input */
     if (pfunc_get_rec(t, &ip) != sizeof(instruct))
@@ -203,7 +205,6 @@ int main(int argc, char *argv[])
     u16                 starting_rec_number;
     u16                 num_recs;
     u8                  blk_recs;
-    char                sumbuf[U16_ASCII_BUF_SIZE];
     struct gen_instruct instruct;
     int                 ret;            /* return value */
     sp_t                sp_gen;         /* handle for sump pump */
@@ -264,10 +265,5 @@ int main(int argc, char *argv[])
         fprintf(stderr, "sp_wait: %s\n",
                 sp_get_error_string(sp_gen, ret)), exit(1); 
 
-    /* don't write checksum so that they don't get mixed in with the output
-     * of runperftests.  The "real" version of gensort would write this to
-     * stderr.
-    fprintf(stderr, "%s\n", u16_to_hex(Sum16, sumbuf));
-     */
     return (0);
 }
