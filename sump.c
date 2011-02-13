@@ -2080,7 +2080,9 @@ ssize_t sp_write_input(sp_t sp, void *buf, ssize_t size)
     char                *trans_src;
     char                *trans_dst;
     in_buf_t            *ib;
+#if !defined(SUMP_PUMP_NO_SORT)
     int                 ret;
+#endif
             
     TRACE("sp_write_input: size %d\n", size);
     
