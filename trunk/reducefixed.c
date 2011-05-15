@@ -62,14 +62,19 @@ int main(int argc, char *argv[])
     sp_t                sp;
     int                 ret;
 
-    if (sp_start(&sp, reducefixed,
-                 "REC_SIZE=14 GROUP_BY OUT_FILE[0]=rout.txt %s",
-                 sp_argv_to_str(argv + 1, argc - 1)) != SP_OK)
-        fprintf(stderr, "sp_start() error\n"), exit(1);
-
+    ret = sp_start(&sp, reducefixed,
+                   "-REC_SIZE=14 -GROUP_BY -OUT_FILE[0]=rout.txt %s",
+                   sp_argv_to_str(argv + 1, argc - 1));
+    if (ret != SP_OK)
+    {
+        fprintf(stderr, "sp_start: %s\n", sp_get_error_string(sp, ret));
+        return (1);
+    }
     if ((ret = sp_wait(sp)) != SP_OK)
-        fprintf(stderr, "sp_wait: %s\n", sp_get_error_string(sp, ret)), exit(1); 
-    
+    {
+        fprintf(stderr, "sp_wait: %s\n", sp_get_error_string(sp, ret));
+        return (1);
+    }
     return (0);
 }
 

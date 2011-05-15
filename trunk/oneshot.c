@@ -53,12 +53,11 @@ int main(int argc, char *argv[])
     /* have pump function raise an error that causes a sp_write_input() call
      * to fail.
      */
-    def = "THREADS=1 TASKS=1 IN_BUF_SIZE=1 REC_SIZE=1";
+    def = "-THREADS=1 -TASKS=1 -IN_BUF_SIZE=1 -REC_SIZE=1";
     ret = sp_start(&sp, error_pump, def);
     if (ret != SP_OK)
     {
-        fprintf(stderr, "return status from sp_start(&sp, error_pump, "
-                "\"%s\") is not SP_OK: %d\n", def, ret);
+        fprintf(stderr, "sp_start: %s\n", sp_get_error_string(sp, ret));
         return (1);
     }
     /* should get an error before loop completes */
