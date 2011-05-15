@@ -73,7 +73,7 @@ for i in range(iteration_count):
             testprog = 'reducefixed'
         match_keys = str(randint(1, 3))
         correctoutput = 'rout' + match_keys + '_correct.txt'
-        reduce_input_file = ' IN_FILE=rin' + match_keys + '.txt'
+        reduce_input_file = ' -IN_FILE=rin' + match_keys + '.txt'
     else:
         testindex = randint(1,3)
         if testindex == 1:
@@ -84,19 +84,19 @@ for i in range(iteration_count):
         elif testindex == 2:
             testprog = 'upperfixed' 
             correctoutput = 'upper_correct.txt'
-            rec_size = ' REC_SIZE=' + str(randint(2,12))
+            rec_size = ' -REC_SIZE=' + str(randint(2,12))
             if randint(0,1) == 0:
                 testprog = testprog + ' onebyone'
         elif testindex == 3:
             testprog = 'upperwhole' 
             correctoutput = 'upper_correct.txt'
     cmd = './' + testprog + rec_size + reduce_input_file + \
-          ' OUT_BUF_SIZE[0]=' + str(outsize) + \
-          ' IN_BUF_SIZE=' + str(insize) + \
-          ' RW_TEST_SIZE=' + str(rwsize) + \
-          ' IN_BUFS=' + str(inbufs) + \
-          ' TASKS=' + str(tasks) + \
-          ' THREADS=' + str(threads) 
+          ' -OUT_BUF_SIZE[0]=' + str(outsize) + \
+          ' -IN_BUF_SIZE=' + str(insize) + \
+          ' -RW_TEST_SIZE=' + str(rwsize) + \
+          ' -IN_BUFS=' + str(inbufs) + \
+          ' -TASKS=' + str(tasks) + \
+          ' -THREADS=' + str(threads) 
     print i, ' ', cmd
     ret = os.system(cmd)
     if ret != 0:
