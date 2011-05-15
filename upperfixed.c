@@ -85,17 +85,22 @@ int main(int argc, char *argv[])
         argv++;
     }
 
-    if (argc > 1 && !strncmp(argv[1], "REC_SIZE=", 9))
-        Rec_size = atoi(argv[1] + 9);
+    if (argc > 1 && !strncmp(argv[1], "-REC_SIZE=", 10))
+        Rec_size = atoi(argv[1] + 10);
     ret = sp_start(&sp,
                    onebyone ? uppercase_justone : uppercase_while,
-                   "IN_FILE=rin1.txt OUT_FILE[0]=rout.txt %s",
+                   "-IN_FILE=rin1.txt -OUT_FILE[0]=rout.txt %s",
                    sp_argv_to_str(argv + 1, argc - 1));
     if (ret != SP_OK)
-        fprintf(stderr, "sp_start() error: %d\n", ret), exit(1);
-
+    {
+        fprintf(stderr, "sp_start: %s\n", sp_get_error_string(sp, ret));
+        return (1);
+    }
     if ((ret = sp_wait(sp)) != SP_OK)
-        fprintf(stderr, "sp_wait: %s\n", sp_get_error_string(sp, ret)), exit(1); 
+    {
+        fprintf(stderr, "sp_wait: %s\n", sp_get_error_string(sp, ret));
+        return (1);
+    }
     return (0);
 }
 
