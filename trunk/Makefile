@@ -20,11 +20,13 @@ PERF_FILES=lookupref.txt lookupin.txt spgzipinput billing_input.txt \
 CFLAGS=-Wall
 LIB=libsump.so.1
 
+default: $(LIB) sump
+
+all: default reg perf
+
 $(LIB): sump.o
 	gcc -o $(LIB) -shared \
 	-Xlinker --version-script=exports.linux sump.o -lpthread -ldl -lrt
-
-all: $(LIB) reg perf
 
 # SUMP Pump object file. Optimization is not used in order to aid
 # debugging.  Optimization doesn't seem to speed things up that much as
@@ -32,6 +34,9 @@ all: $(LIB) reg perf
 #
 sump.o: sump.c sump.h sumpversion.h
 	gcc -c -fPIC $(CFLAGS) -g sump.c
+
+sump: sump.o main.c sump.h sumpversion.h
+	gcc -g -o sump main.c sump.o -lpthread -ldl -lrt
 
 sumpversion.h: sump.c sump.h
 	(echo -n 'static char *sp_version = "'; echo -n $(RELEASE); echo -n ', svn: '; svnversion -n; echo '";') > sumpversion.h
