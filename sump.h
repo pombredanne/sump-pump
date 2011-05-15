@@ -3,7 +3,7 @@
  *
  * $Revision$
  *
- * Copyright (C) 2010, Ordinal Technology Corp, http://www.ordinal.com
+ * Copyright (C) 2010 - 2011, Ordinal Technology Corp, http://www.ordinal.com
  * 
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of Version 2 of the GNU General Public
@@ -101,42 +101,45 @@ const char *sp_get_id(void);
  *                    multiple sump pump threads at once.
  *      arg_fmt -     Printf-format-like string that can be used with
  *                    subsequent arguments as follows:
- *                    ASCII or UTF_8      Input records are ascii/utf-8 
+ *                    -ASCII or -UTF_8    Input records are ascii/utf-8 
  *                                        characters delimited by a newline
  *                                        character.
- *                    GROUP_BY            Group input records by the given
+ *                    -GROUP_BY or -GROUP Group input records by the given
  *                                        number of keys for the purpose of
  *                                        reducing them.  The sump pump input
  *                                        should be coming from an nsort
  *                                        instance where the "-match"
  *                                        directive has been declared.
- *                    IN_FILE=%s          Input file name for the sump pump
+ *                    -IN_FILE=%s         Input file name for the sump pump
  *                                        input.  if not specified, the input
  *                                        should be written into the sump pump
  *                                        either by calls to sp_write_input()
  *                                        or sp_start_link()
- *                    IN_BUF_SIZE=%d      Overrides default input buffer size
- *                    IN_BUFS=%d          Overrides default number of input
+ *                    -IN_BUF_SIZE=%d     Overrides default input buffer size
+ *                    -IN_BUFS=%d         Overrides default number of input
  *                                        buffers
- *                    OUTPUTS=%d          Overrides default number of output
+ *                    -OUTPUTS=%d         Overrides default number of output
  *                                        streams (1)
- *                    TASKS=%d            Overrides default number of output
+ *                    -TASKS=%d           Overrides default number of output
  *                                        tasks
- *                    THREADS=%d          Overrides default number of threads
+ *                    -THREADS=%d         Overrides default number of threads
  *                                        that are used to execute the pump
  *                                        function in parallel
- *                    OUT_BUF_SIZE[%d]=%d The sizes of each tasks output buffer
- *                                        for the specified output
- *                    OUT_FILE[%d]=%s     The output file name for the
+ *                    -OUT_BUF_SIZE[%d]=%d The sizes of each tasks output buffer
+ *                                        for the specified output.  These can
+ *                                        either be an absolute size in bytes
+ *                                        or a multiplier of the input buffer
+ *                                        size ending in 'x'.
+ *                    -OUT_FILE[%d]=%s    The output file name for the
  *                                        specified output.  if not defined,
  *                                        the output should be read either
  *                                        by calls to sp_read_output() or by
  *                                        sp_start_link().
- *                    REC_SIZE=%d         Defines the input record size in 
+ *                    -REC_SIZE=%d        Defines the input record size in 
  *                                        bytes. The record contents need not 
  *                                        be ascii nor delimited by a newline
  *                                        character.
- *                    WHOLE_BUF           Processing is not done by input
+ *                    -WHOLE_BUF          Processing is not done by input
  *                                        records so not input record type
  *                                        should be defined.  Instead,
  *                                        processing is done by whole input
