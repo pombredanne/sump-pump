@@ -3897,12 +3897,14 @@ static void get_exec_args(sp_t sp, char **ep)
  *                    -ASCII or -UTF_8    Input records are ascii/utf-8 
  *                                        characters delimited by a newline
  *                                        character.
- *                    -GROUP_BY or -GROUP Group input records by the given
- *                                        number of keys for the purpose of
- *                                        reducing them.  The sump pump input
+ *                    -GROUP_BY or -GROUP Group input records for the purpose
+ *                                        of reducing them. The sump pump input
  *                                        should be coming from an nsort
  *                                        instance where the "-match"
- *                                        directive has been declared.
+ *                                        directive has been declared. This
+ *                                        directive prevents records with
+ *                                        equal keys from being dispersed to
+ *                                        more than one sump pump task.
  *                    -IN_FILE=%s         Input file name for the sump pump
  *                                        input.  if not specified, the input
  *                                        should be written into the sump pump
@@ -4075,7 +4077,7 @@ int sp_start(sp_t *caller_sp,
                 sp->in_buf_size = (ssize_t)get_numeric_arg(sp, &p);
                 sp->in_buf_size *= (ssize_t)get_scale(&p);
             }
-            else if (scan("IN_FILE=", &p))
+            else if (scan("IN_FILE=", &p) || scan("IN=", &p))
             {
                 /* get input file here */
                 sp->in_file = get_string_arg(&p);
@@ -4127,7 +4129,7 @@ int sp_start(sp_t *caller_sp,
                     sp->out[index].size_specified = TRUE;
                 }
             }
-            else if (scan("OUT_FILE", &p))
+            else if (scan("OUT_FILE", &p) || scan("OUT", &p))
             {
                 if (*p == '=')   /* if no index in square brackets */
                 {
