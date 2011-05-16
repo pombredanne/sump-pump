@@ -104,41 +104,61 @@ const char *sp_get_id(void);
  *                    -ASCII or -UTF_8    Input records are ascii/utf-8 
  *                                        characters delimited by a newline
  *                                        character.
- *                    -GROUP_BY or -GROUP Group input records by the given
- *                                        number of keys for the purpose of
- *                                        reducing them.  The sump pump input
+ *                    -GROUP_BY or -GROUP Group input records for the purpose
+ *                                        of reducing them. The sump pump input
  *                                        should be coming from an nsort
  *                                        instance where the "-match"
- *                                        directive has been declared.
- *                    -IN_FILE=%s         Input file name for the sump pump
+ *                                        directive has been declared. This
+ *                                        directive prevents records with
+ *                                        equal keys from being dispersed to
+ *                                        more than one sump pump task.
+ *                    -IN=%s or -IN_FILE=%s Input file name for the sump pump
  *                                        input.  if not specified, the input
  *                                        should be written into the sump pump
  *                                        either by calls to sp_write_input()
  *                                        or sp_start_link()
- *                    -IN_BUF_SIZE=%d     Overrides default input buffer size
+ *                    -IN_BUF_SIZE=%d[k,m,g] Overrides default input buffer
+ *                                        size (256kb). If a 'k', 'm' or 'g'
+ *                                        suffix is specified, the specified
+ *                                        size is multiplied by 2^10, 2^20 or
+ *                                        2^30 respectively.
  *                    -IN_BUFS=%d         Overrides default number of input
- *                                        buffers
+ *                                        buffers (the number of tasks).
  *                    -OUTPUTS=%d         Overrides default number of output
  *                                        streams (1)
  *                    -TASKS=%d           Overrides default number of output
- *                                        tasks
+ *                                        tasks (3x the number of threads).
  *                    -THREADS=%d         Overrides default number of threads
  *                                        that are used to execute the pump
- *                                        function in parallel
- *                    -OUT_BUF_SIZE[%d]=%d The sizes of each tasks output buffer
- *                                        for the specified output.  These can
- *                                        either be an absolute size in bytes
- *                                        or a multiplier of the input buffer
- *                                        size ending in 'x'.
- *                    -OUT_FILE[%d]=%s    The output file name for the
- *                                        specified output.  if not defined,
- *                                        the output should be read either
- *                                        by calls to sp_read_output() or by
- *                                        sp_start_link().
+ *                                        function in parallel. The default is
+ *                                        the number of logical processors in
+ *                                        the system.
+ *                    -OUT_BUF_SIZE[%d]=%d[x,k,m,g] Overrides default output
+ *                                        buffer size (2x the input buf size)
+ *                                        for the specified output index, or
+ *                                        output index 0 if none is specified.
+ *                                        If the size ends with a suffix of
+ *                                        'x', the size is used as a multiplier
+ *                                        of the input buffer size. If a 'k',
+ *                                        'm' or 'g' suffix is specified, the
+ *                                        specified size is multiplied by 2^10,
+ *                                        2^20 or 2^30 respectively. It is not
+ *                                        an error if the output of a task
+ *                                        exceeds the output buffer size, but
+ *                                        it can potentially result in loss
+ *                                        of parallelism.
+ *                    -OUT[%d]=%s -OUT_FILE[%d]=%s  The output file name for
+ *                                        the specified output.  If not 
+ *                                        defined, the output should be read
+ *                                        either by calls to sp_read_output()
+ *                                        or by sp_start_link().
  *                    -REC_SIZE=%d        Defines the input record size in 
  *                                        bytes. The record contents need not 
  *                                        be ascii nor delimited by a newline
- *                                        character.
+ *                                        character. If not specified, records
+ *                                        must consist of ascii or utf-8
+ *                                        characters and be terminated by a
+ *                                        newline.
  *                    -WHOLE_BUF          Processing is not done by input
  *                                        records so not input record type
  *                                        should be defined.  Instead,
