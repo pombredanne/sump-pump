@@ -20,7 +20,7 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
  *
- * Usage: main [sump pump directives] -exec program_name ...
+ * Usage: sump [sump pump directives] program_name [program arguments]
  *
  */
 #include "sump.h"
@@ -29,12 +29,72 @@
 #include <stdlib.h>
 #include <fcntl.h>
 
+char Sump_usage[] =
+    "sump usage:\n"
+    "  sump [sump pump directives] program_name [program arguments]\n"
+    "\n"
+    "The SUMP Pump program reads its input and breaks it into partitions\n"
+    "that are approximately the size of its input buffers.  Each input\n"
+    "partition becomes the standard input for a separate, external\n"
+    "invocation of the program specified on the sump command line. The\n"
+    "standard outputs of the program invocations are concatenated to\n"
+    "form the output of the sump program. For an animated model, see:\n"
+    "http://www.ordinal.com/sump.html\n"
+    "\n"
+    "Directives (case insensitive, '_' optional):\n"
+    "  -GROUP_BY or -GROUP Group input records for the purpose of reducing\n"
+    "                      them. The input should be coming from an nsort\n"
+    "                      instance where the \"-match\" directive has\n"
+    "                      been declared. This directive prevents records\n"
+    "                      with equal keys from being dispersed to more\n"
+    "                      than one external program invocation, although\n"
+    "                      each program invocation may need to process\n"
+    "                      records with more than one key value.\n"
+    "\n"
+    "  -IN=%s or           Input file name. If not specified, the input\n"
+    "    -IN_FILE=%s       is read from standard input.\n"
+    "\n"
+    "  -IN_BUF_SIZE=%d[k,m,g] Overrides default input buffer size (1MB).\n"
+    "                      If a 'k', 'm' or 'g' suffix is specified, the\n"
+    "                      specified size is multiplied by 2^10, 2^20 or\n"
+    "                      2^30 respectively.\n"
+    "\n"
+    "  -THREADS=%d         Defines the maximum number of simultaneous\n"
+    "                      invocations of the external program.  The\n"
+    "                      default maximum is the number of logical\n"
+    "                      processors in the system.\n"
+    "\n"
+    "  -OUT_BUF_SIZE=%d[x,k,m,g] Overrides default output buffer size \n"
+    "                      (2x the input buffer size). If the size ends\n"
+    "                      with a suffix of 'x', the size is used as a\n"
+    "                      multiplier of the input buffer size. If a\n"
+    "                      'k', 'm' or 'g' suffix is specified, the\n"
+    "                      specified size is multiplied by 2^10, 2^20 or\n"
+    "                      2^30 respectively. It is not an error if the\n"
+    "                      output of a program invocation exceeds the output\n"
+    "                      buffer size, but it can potentially result in\n"
+    "                      loss of parallelism.\n"
+    "\n"
+    "  -OUT=%s or          The output file name.  If not defined, the\n"
+    "    -OUT_FILE=%s      output is written to standard output.\n"
+    "\n"
+    "  -REC_SIZE=%d        Defines the input record size in bytes. If not\n"
+    "                      specified, records must consist of ascii or\n"
+    "                      utf-8 characters and be terminated by a newline\n"
+    "                      character.\n"
+    ;
 
 int main(int argc, char *argv[])
 {
     sp_t                sp;
     int                 ret;
 
+    if (argc == 1 || (argc > 1 && !strcmp(argv[1], "-?")))
+    {
+        fprintf(stderr, "%s", Sump_usage);
+        return (1);
+    }
+    
     ret = sp_start(&sp, NULL,
                    "-utf_8 "
                    "-in_file=<stdin> "
