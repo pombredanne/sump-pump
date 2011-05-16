@@ -1,4 +1,4 @@
-/* main.c - SUMP Pump(TM) program that executes external programs
+/* main.c - SUMP Pump(TM) program that executes external programs in parallel
  *
  *          SUMP Pump is a trademark of Ordinal Technology Corp
  *
@@ -33,11 +33,12 @@ char Sump_usage[] =
     "sump usage:\n"
     "  sump [sump pump directives] program_name [program arguments]\n"
     "\n"
-    "The SUMP Pump program reads its input and breaks it into partitions\n"
-    "that are approximately the size of its input buffers.  Each input\n"
-    "partition becomes the standard input for a separate, external\n"
-    "invocation of the program specified on the sump command line. The\n"
-    "standard outputs of the program invocations are concatenated to\n"
+
+    "The SUMP (Scale Up MultiProcessor) Pump program reads its input and\n"
+    "breaks it into partitions that are approximately the size of its input\n"
+    "buffers. Each input partition becomes the standard input of a separate,\n"
+    "external invocation of the program specified on the sump command line.\n"
+    "The standard outputs of the program invocations are concatenated to\n"
     "form the output of the sump program. For an animated model, see:\n"
     "http://www.ordinal.com/sump.html\n"
     "\n"
