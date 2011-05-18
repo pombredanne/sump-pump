@@ -256,8 +256,8 @@ int main(int argc, char *argv[])
      * threads.  this thread will then validate the summaries.
      */
     ret = sp_start(&sp_val, summarize_records,
-                   "IN_FILE=%s IN_BUF_SIZE=%d "
-                   "REC_SIZE=%d OUT_BUF_SIZE[0]=%d %s",
+                   "-IN_FILE=%s -IN_BUF_SIZE=%d "
+                   "-REC_SIZE=%d -OUT_BUF_SIZE[0]=%d %s",
                    argv[1],
                    4 * 1024 * 1024,              /* input buffer size */
                    REC_SIZE,                     /* input record size */
@@ -265,7 +265,7 @@ int main(int argc, char *argv[])
                    sp_argv_to_str(argv + 2, argc - 2));
     if (ret)
     {
-        fprintf(stderr, "sp_start failed: %s\n",
+        fprintf(stderr, "valsort: sp_start failed: %s\n",
                 sp_get_error_string(sp_val, ret));
         return (ret);
     }

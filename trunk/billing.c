@@ -285,7 +285,7 @@ int main(int argc, char *argv[])
 
     /* start map sump pump */
     ret = sp_start(&sp_map, map_pump,
-                   "ASCII IN_FILE=%s %s", argv[1], sp_arg);
+                   "-ASCII -IN=%s %s", argv[1], sp_arg);
     if (ret != SP_OK)
     {
         fprintf(stderr, "sp_start for map failed: %s\n",
@@ -311,38 +311,39 @@ int main(int argc, char *argv[])
 
     /* start reduce sump pump */
     ret = sp_start(&sp_reduce, reduce_pump, 
-                   "ASCII GROUP_BY "
-                   "OUT_FILE[0]=%s "
-                   "IN_BUF_SIZE=500000 "
-                   "OUT_BUF_SIZE[0]=700000 "  /* allow for output expansion */
+                   "-ASCII -GROUP_BY "
+                   "-OUT_FILE[0]=%s "
+                   "-IN_BUF_SIZE=500000 "
+                   "-OUT_BUF_SIZE[0]=700000 "  /* allow for output expansion */
                    "%s ",
                    argv[2], sp_arg);
     if (ret != SP_OK)
     {
-        fprintf(stderr, "sp_start for reduce failed: %s\n",
+        fprintf(stderr, "billing: sp_start for reduce failed: %s\n",
                 sp_get_error_string(sp_reduce, ret));
         return(1);
     }
 
     /* link map sump pump to sort, and sort to reduce sump pump */
     if ((ret = sp_link(sp_map, 0, sp_sort)) != SP_OK)
-        fprintf(stderr, "sp_link(sp_map, 0, sp_sort): %s\n",
+        fprintf(stderr, "billing: sp_link(sp_map, 0, sp_sort): %s\n",
                 sp_get_error_string(NULL, ret)), exit(1); 
     if ((ret = sp_link(sp_sort, 0, sp_reduce)) != SP_OK)
-        fprintf(stderr, "sp_link(sp_sort, 0, sp_reduce): %s\n",
+        fprintf(stderr, "billing: sp_link(sp_sort, 0, sp_reduce): %s\n",
                 sp_get_error_string(NULL, ret)), exit(1); 
 
     /* wait for sump pumps from upstream to downstream */
     if ((ret = sp_wait(sp_map)) != SP_OK)
-        fprintf(stderr, "sp_map: %s\n",
+        fprintf(stderr, "billing: sp_map: %s\n",
                 sp_get_error_string(sp_map, ret)), exit(1); 
     if ((ret = sp_wait(sp_sort)) != SP_OK)
-        fprintf(stderr, "sp_sort: %s\n",
+        fprintf(stderr, "billing: sp_sort: %s\n",
                 sp_get_error_string(sp_sort, ret)), exit(1); 
     else if (print_stats)
-        fprintf(stderr, "sort stats:\n%s\n", sp_get_sort_stats(sp_sort));
+        fprintf(stderr, "billing: sort stats:\n%s\n",
+                sp_get_sort_stats(sp_sort));
     if ((ret = sp_wait(sp_reduce)) != SP_OK)
-        fprintf(stderr, "sp_reduce: %s\n",
+        fprintf(stderr, "billing: sp_reduce: %s\n",
                 sp_get_error_string(sp_reduce, ret)), exit(1); 
 
     return (0);

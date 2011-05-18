@@ -215,20 +215,24 @@ int main(int argc, char *argv[])
 
     /* start sump pump to read lookup.txt file and lookup key values */
     if ((ret = sp_start(&sp, lookup_pump,
-                        "ASCII "
-                        "IN_FILE=lookupin.txt OUTPUTS=2 "
-                        "OUT_FILE[0]=match.txt OUT_FILE[1]=nomatch.txt "
-                        "IN_BUF_SIZE=4m "
-                        "OUT_BUF_SIZE[0]=8m "  /* 2x bigger */
-                        "OUT_BUF_SIZE[1]=8m "  /* 2x bigger */
+                        "-ASCII "
+                        "-IN=lookupin.txt -OUTPUTS=2 "
+                        "-OUT[0]=match.txt -OUT[1]=nomatch.txt "
+                        "-IN_BUF_SIZE=4m "
+                        "-OUT_BUF_SIZE[0]=8m "  /* 2x bigger */
+                        "-OUT_BUF_SIZE[1]=8m "  /* 2x bigger */
                         "%s",
                         sp_argv_to_str(argv + 1, argc - 1))) != SP_OK)
     {
-        fprintf(stderr, "sp_start failed: %s\n", sp_get_error_string(sp, ret));
+        fprintf(stderr, "lookup: sp_start failed: %s\n",
+                sp_get_error_string(sp, ret));
         exit(1);
     }
 
     if ((ret = sp_wait(sp)) != SP_OK)
-        fprintf(stderr, "sp_wait: %s\n", sp_get_error_string(sp, ret)), exit(1); 
+    {
+        fprintf(stderr, "lookup: sp_wait: %s\n", sp_get_error_string(sp, ret));
+        exit(1);
+    }
     return (0);
 }
