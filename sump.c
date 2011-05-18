@@ -929,6 +929,9 @@ void *pipe_reader(void *arg)
     int                 out_index;
     ssize_t             len;
     ssize_t             total = 0;
+    ssize_t             buf_size;
+    ssize_t             buf_bytes;
+    int                 ret;
 
     pipe = (struct std_pipe *)arg;
     ex = pipe->ex;
@@ -949,22 +952,82 @@ void *pipe_reader(void *arg)
         out_index = 0;
     }
 
-    /* read from pipe and write to task output */
-    for (;;)
+    /* if we are just writing to a whole input buffer.
+     */
+    if (sp->flags & SP_WHOLE_BUF)
     {
-        len = read(pipe->fds[READ], buf, PIPE_BUF_SIZE);
-        if (len == 0)
-            break;
-        if (len < 0)
+
+        /* get output buffer */
+        ret = pfunc_get_out_buf(t, out_index,
+                                (void **)&buf, (size_t *)&buf_size);
+        if (ret != 0)
         {
-            pipe->perrno = errno;
-            break;
+            pfunc_error(t, "internal error: "
+                        "bad ret from sp_get_out_buf: %d\n", ret);
+            goto reader_return;
         }
-        total += len;
-        if (pfunc_write(t, out_index, buf, len) != len)
-            break;
+        
+        /* read from pipe into output buffer, flushing buffer when necessary */
+        buf_bytes = 0;
+        for (;;)
+        {
+            len = read(pipe->fds[READ], buf + buf_bytes, buf_size - buf_bytes);
+            if (len == 0)
+                break;
+            if (len < 0)
+            {
+                pipe->perrno = errno;
+                buf_bytes = 0;
+                break;
+            }
+            buf_bytes += len;
+            if (buf_bytes == buf_size)
+            {
+                /* commit/flush output bytes */
+                ret = pfunc_put_out_buf_bytes(t, out_index, buf_bytes);
+                if (ret != 0)
+                {
+                    pfunc_error(t, "internal error: " 
+                                "bad ret from sp_put_out_buf_bytes: %d\n",ret);
+                    goto reader_return;
+                }
+                buf_bytes = 0;
+            }
+        }
+        if (buf_bytes != 0)
+        {
+            /* commit/flush output bytes */
+            ret = pfunc_put_out_buf_bytes(t, out_index, buf_bytes);
+            if (ret != 0)
+            {
+                pfunc_error(t, "internal error: " 
+                            "bad ret from sp_put_out_buf_bytes: %d\n",ret);
+                goto reader_return;
+            }
+        }
     }
-    
+    else
+    {
+        /* read from pipe and write to task output */
+        for (;;)
+        {
+            len = read(pipe->fds[READ], buf, PIPE_BUF_SIZE);
+            if (len == 0)
+                break;
+            if (len < 0)
+            {
+                pipe->perrno = errno;
+                break;
+            }
+            total += len;
+            if (pfunc_write(t, out_index, buf, len) != len)
+            {
+                pfunc_error(t, "internal error: pfunc_write failure\n");
+                break;
+            }
+        }
+    }
+  reader_return:
     pfunc_mutex_lock(t);
     {
         close(pipe->fds[READ]);
@@ -1139,59 +1202,79 @@ int pfunc_exec(sp_task_t t, void *unused)
                                fname, errmsg));
         }
     }
-    
-    buf_bytes = 0;
-    for (;;)
-    {
-        /* for each record in the group */
-        while (pfunc_get_rec(t, &rec) > 0)
-        {
-            int     len;
-            int     copy_size;
-        
-            /* buffer and write to in.fds[WRITE] */
-            len = strlen(rec);
-            while (len)
-            {
-                copy_size = len;
-                if (copy_size > PIPE_BUF_SIZE - buf_bytes)
-                    copy_size = PIPE_BUF_SIZE - buf_bytes;
-                memcpy(ex->in_buf + buf_bytes, rec, copy_size);
-                buf_bytes += copy_size;
-                if (buf_bytes == PIPE_BUF_SIZE)
-                {
-                    if (write(ex->in.fds[WRITE], ex->in_buf, buf_bytes) !=
-                        buf_bytes)
-                    {
-                        ex->in.perrno = errno;
-                        buf_bytes = 0;
-                        break;
-                    }
-                    buf_bytes = 0;
-                    rec += copy_size;
-                }
-                len -= copy_size;
-            }
-        }
-        /* if we are doing a "group by" and we have not finished all the
-         * records in the first input buffer, then reset the eof state to
-         * continue reading records from the first input buffer.
-         */
-        if ((sp->flags & SP_GROUP_BY) && t->first_in_buf)
-        {
-            t->input_eof = FALSE;
-            t->first_group_rec = TRUE;
-        }
-        else
-            break;  /* done with first input buffer and maybe more */
-    }
-    /* flush any remainder */
-    if (buf_bytes != 0)
-    {
-        if (write(ex->in.fds[WRITE], ex->in_buf, buf_bytes) != buf_bytes)
-            ex->in.perrno = errno;
-    }
 
+    /* if we are just reading a whole input buffer, not record by record.
+     */
+    if (sp->flags & SP_WHOLE_BUF)
+    {
+        unsigned char   *in;
+        size_t          in_size;
+        int             ret;
+
+        /* get input buffer */
+        if ((ret = pfunc_get_in_buf(t, (void **)&in, &in_size)) != 0)
+            return (pfunc_error(t, "internal pfunc error: "
+                                "bad ret from sp_get_in_buf: %d\n", ret));
+        if (write(ex->in.fds[WRITE], in, in_size) != in_size)
+        {
+            ex->in.perrno = errno;
+        }
+    }
+    else  /* the records are lines of text */
+    {
+        buf_bytes = 0;
+        for (;;)
+        {
+            /* for each record in the group */
+            while (pfunc_get_rec(t, &rec) > 0)
+            {
+                int     len;
+                int     copy_size;
+        
+                /* buffer and write to in.fds[WRITE] */
+                len = strlen(rec);
+                while (len)
+                {
+                    copy_size = len;
+                    if (copy_size > PIPE_BUF_SIZE - buf_bytes)
+                        copy_size = PIPE_BUF_SIZE - buf_bytes;
+                    memcpy(ex->in_buf + buf_bytes, rec, copy_size);
+                    buf_bytes += copy_size;
+                    if (buf_bytes == PIPE_BUF_SIZE)
+                    {
+                        if (write(ex->in.fds[WRITE], ex->in_buf, buf_bytes) !=
+                            buf_bytes)
+                        {
+                            ex->in.perrno = errno;
+                            buf_bytes = 0;
+                            break;
+                        }
+                        buf_bytes = 0;
+                        rec += copy_size;
+                    }
+                    len -= copy_size;
+                }
+            }
+            /* if we are doing a "group by" and we have not finished all the
+             * records in the first input buffer, then reset the eof state to
+             * continue reading records from the first input buffer.
+             */
+            if ((sp->flags & SP_GROUP_BY) && t->first_in_buf)
+            {
+                t->input_eof = FALSE;
+                t->first_group_rec = TRUE;
+            }
+            else
+                break;  /* done with first input buffer and maybe more */
+        }
+        /* flush any remainder */
+        if (buf_bytes != 0)
+        {
+            if (write(ex->in.fds[WRITE], ex->in_buf, buf_bytes) != buf_bytes)
+                ex->in.perrno = errno;
+        }
+    }
+    
     pthread_mutex_lock(&Global_lock);
     close(ex->in.fds[WRITE]);
     ex->in.fds[WRITE] = INVALID_FD;
@@ -3929,7 +4012,7 @@ static void get_exec_args(sp_t sp, char **ep)
  *                    -OUT_BUF_SIZE[%d]=%d[x,k,m,g] Overrides default output
  *                                        buffer size (2x the input buf size)
  *                                        for the specified output index, or
- *                                        output index 0 if none is specified.
+ *                                        output 0 if no index is specified.
  *                                        If the size ends with a suffix of
  *                                        'x', the size is used as a multiplier
  *                                        of the input buffer size. If a 'k',
@@ -3940,11 +4023,17 @@ static void get_exec_args(sp_t sp, char **ep)
  *                                        exceeds the output buffer size, but
  *                                        it can potentially result in loss
  *                                        of parallelism.
- *                    -OUT[%d]=%s -OUT_FILE[%d]=%s  The output file name for
- *                                        the specified output.  If not 
+ *                    -OUT[%d]=%s or -OUT_FILE[%d]=%s  The output file name for
+ *                                        the specified output index, or output
+ *                                        0 if no index is specified.  If not 
  *                                        defined, the output should be read
  *                                        either by calls to sp_read_output()
  *                                        or by sp_start_link().
+ *                    -RAW or -WHOLE or   Processing is not done by input
+ *                      -WHOLE_BUF        records so not input record type
+ *                                        should be defined.  Instead,
+ *                                        processing is done by whole input
+ *                                        buffers.
  *                    -REC_SIZE=%d        Defines the input record size in 
  *                                        bytes. The record contents need not 
  *                                        be ascii nor delimited by a newline
@@ -3952,11 +4041,6 @@ static void get_exec_args(sp_t sp, char **ep)
  *                                        must consist of ascii or utf-8
  *                                        characters and be terminated by a
  *                                        newline.
- *                    -WHOLE_BUF          Processing is not done by input
- *                                        records so not input record type
- *                                        should be defined.  Instead,
- *                                        processing is done by whole input
- *                                        buffers.
  *      ...           potential subsequent arguments to prior arg_fmt
  */
 int sp_start(sp_t *caller_sp,
@@ -4187,9 +4271,16 @@ int sp_start(sp_t *caller_sp,
                 }
                 sp->num_outputs = num_outputs;
             }
+            else if (scan("RAW", &p) ||
+                     scan("WHOLE_BUF", &p) || scan("WHOLE", &p))
+            {
+                sp->flags &= ~SP_UTF_8;
+                sp->flags |= SP_WHOLE_BUF;
+            }
             else if (scan("REC_SIZE=", &p))
             {
                 sp->rec_size = (int)get_numeric_arg(sp, &p);
+                sp->flags &= ~SP_UTF_8;
                 sp->flags |= SP_FIXED;
                 if (sp->rec_size <= 0)
                 {
@@ -4215,10 +4306,6 @@ int sp_start(sp_t *caller_sp,
                 num_threads = (int)get_numeric_arg(sp, &p);
                 if (num_threads > 0)
                     sp->num_threads = (unsigned)num_threads;
-            }
-            else if (scan("WHOLE_BUF", &p))
-            {
-                sp->flags |= SP_WHOLE_BUF;
             }
             else
                 syntax_error(sp, p, "unrecognized keyword");
