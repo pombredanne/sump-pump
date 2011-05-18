@@ -136,7 +136,7 @@ const char *sp_get_id(void);
  *                    -OUT_BUF_SIZE[%d]=%d[x,k,m,g] Overrides default output
  *                                        buffer size (2x the input buf size)
  *                                        for the specified output index, or
- *                                        output index 0 if none is specified.
+ *                                        output 0 if no index is specified.
  *                                        If the size ends with a suffix of
  *                                        'x', the size is used as a multiplier
  *                                        of the input buffer size. If a 'k',
@@ -147,11 +147,17 @@ const char *sp_get_id(void);
  *                                        exceeds the output buffer size, but
  *                                        it can potentially result in loss
  *                                        of parallelism.
- *                    -OUT[%d]=%s -OUT_FILE[%d]=%s  The output file name for
- *                                        the specified output.  If not 
+ *                    -OUT[%d]=%s or -OUT_FILE[%d]=%s  The output file name for
+ *                                        the specified output index, or output
+ *                                        0 if no index is specified.  If not 
  *                                        defined, the output should be read
  *                                        either by calls to sp_read_output()
  *                                        or by sp_start_link().
+ *                    -RAW or -WHOLE or   Processing is not done by input
+ *                      -WHOLE_BUF        records so not input record type
+ *                                        should be defined.  Instead,
+ *                                        processing is done by whole input
+ *                                        buffers.
  *                    -REC_SIZE=%d        Defines the input record size in 
  *                                        bytes. The record contents need not 
  *                                        be ascii nor delimited by a newline
@@ -159,11 +165,6 @@ const char *sp_get_id(void);
  *                                        must consist of ascii or utf-8
  *                                        characters and be terminated by a
  *                                        newline.
- *                    -WHOLE_BUF          Processing is not done by input
- *                                        records so not input record type
- *                                        should be defined.  Instead,
- *                                        processing is done by whole input
- *                                        buffers.
  *      ...           potential subsequent arguments to prior arg_fmt
  */
 int sp_start(sp_t *sp, sp_pump_t pump_func, char *arg_fmt, ...);
