@@ -99,20 +99,21 @@ int main(int argc, char *argv[])
     /* max expansion is 0.03% + gzip header size (+1 more for rounding up) */
     out_buf_size = (size_t)((double)in_buf_size * 1.0003) + 512;
     ret = sp_start(&sp, gzip_pump,
-                   "WHOLE_BUF "
-                   "IN_FILE=<stdin> OUT_FILE[0]=<stdout> "             
-                   "IN_BUF_SIZE=%d OUT_BUF_SIZE[0]=%d %s",
+                   "-WHOLE_BUF "
+                   "-IN_FILE=<stdin> -OUT_FILE[0]=<stdout> "             
+                   "-IN_BUF_SIZE=%d -OUT_BUF_SIZE[0]=%d %s",
                    in_buf_size, out_buf_size,
                    sp_argv_to_str(argv + 1, argc - 1));
     if (ret != SP_OK)
     {
-        fprintf(stderr, "sp_start failed: %s\n", sp_get_error_string(sp, ret));
+        fprintf(stderr, "spgzip: sp_start failed: %s\n",
+                sp_get_error_string(sp, ret));
         return (1);
     }
     /* wait for sump pump to complete */
     if ((ret = sp_wait(sp)) != SP_OK)
     {
-        fprintf(stderr, "sp_wait: %s\n", sp_get_error_string(sp, ret));
+        fprintf(stderr, "spgzip: sp_wait: %s\n", sp_get_error_string(sp, ret));
         return (1);
     }
     return (0);

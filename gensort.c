@@ -223,8 +223,8 @@ int main(int argc, char *argv[])
      * maximum number of records that will be generated per instruction.
      */
     ret = sp_start(&sp_gen, gen_block,
-                   "IN_BUF_SIZE=%d REC_SIZE=%d OUT_BUF_SIZE[0]=%d "
-                   "OUT_FILE[0]=%s %s",
+                   "-IN_BUF_SIZE=%d -REC_SIZE=%d -OUT_BUF_SIZE[0]=%d "
+                   "-OUT=%s %s",
                    sizeof(struct gen_instruct),  /* input buf size */
                    sizeof(struct gen_instruct),  /* input record size */
                    BLK_RECS * REC_SIZE,          /* output buf size */
@@ -232,7 +232,7 @@ int main(int argc, char *argv[])
                    sp_argv_to_str(argv + 3, argc - 3)); /* sump pump args */
     if (ret)
     {
-        fprintf(stderr, "sp_start failed: %s\n",
+        fprintf(stderr, "gensort: sp_start failed: %s\n",
                 sp_get_error_string(sp_gen, ret));
         return (ret);
     }
@@ -251,18 +251,18 @@ int main(int argc, char *argv[])
             blk_recs = BLK_RECS;
         instruct.num_recs = blk_recs;
         if (sp_write_input(sp_gen, &instruct, sizeof(instruct)) != sizeof(instruct))
-            fprintf(stderr, "sp_write_input: %s\n",
+            fprintf(stderr, "gensort: sp_write_input: %s\n",
                     sp_get_error_string(sp_gen, SP_WRITE_ERROR)), exit(1); 
         instruct.starting_rec.lo8 += BLK_RECS;
     }
     /* write EOF to sump pump so it will wind down */
     if (sp_write_input(sp_gen, NULL, 0) != 0)
-        fprintf(stderr, "sp_write_input(0): %s\n",
+        fprintf(stderr, "gensort: sp_write_input(0): %s\n",
                 sp_get_error_string(sp_gen, SP_WRITE_ERROR)), exit(1); 
 
     /* wait for sump pump to finish */
     if ((ret = sp_wait(sp_gen)) != SP_OK)
-        fprintf(stderr, "sp_wait: %s\n",
+        fprintf(stderr, "gensort: sp_wait: %s\n",
                 sp_get_error_string(sp_gen, ret)), exit(1); 
 
     return (0);
