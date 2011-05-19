@@ -163,5 +163,6 @@ run_program_set('billing billing_input.txt billing_output.txt', '', 535985261 + 
 run_program_set('gensort 10000000 sortinput.txt', '', 0 + 1000000000)
 run_program_set('valsort sortoutput.txt', ' > /dev/null', 1000000000 + 0)
 run_program_set('spgzip', ' < spgzipinput > spgzipinput.gz', 274747890 + 139887849)
+run_program_set('wordcount.sh', '', 105311535 + 3497600)
 
 
