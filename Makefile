@@ -15,7 +15,7 @@ REG_FILES=rin1.txt rin2.txt rin3.txt upper_correct.txt rout1_correct.txt \
 # performance tests and files
 PERF_TESTS=spgzip lookup billing gensort valsort
 PERF_FILES=lookupref.txt lookupin.txt spgzipinput billing_input.txt \
-           billing_correct_output.txt sortoutput.txt
+           billing_correct_output.txt sortoutput.txt word_100MB.txt
 
 CFLAGS=-Wall
 LIB=libsump.so.1
@@ -123,3 +123,9 @@ sortoutput.txt: gensort
 	gensort 10000000 sortinput.txt
 	@echo warning: this sort takes a long time
 	(LC_ALL=C; export LC_ALL; sort sortinput.txt -o sortoutput.txt)
+
+word_100MB.txt:
+	@echo downloading data file from the web...
+	urlretrieve.py http://mapreduce.stanford.edu/datafiles/word_count.tar.gz word_count.tar.gz
+	gzip -dc < word_count.tar.gz | tar xvf - word_count_datafiles/word_100MB.txt
+	mv word_count_datafiles/word_100MB.txt .
