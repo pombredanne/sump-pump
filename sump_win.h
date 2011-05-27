@@ -75,7 +75,6 @@ typedef HANDLE pthread_condattr_t;
 typedef int pid_t;
 
 #define strncasecmp _strnicmp
-#define strerror_r nt_strerror
 #define ESRCH 3
 #define ETIMEDOUT 145
 

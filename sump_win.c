@@ -277,31 +277,3 @@ void pthread_exit(void *status)
 {
     _endthreadex((UINT)(size_t)status);
 }
-
-
-/* nt_strerror - print the string for an NT error code and exit.
- */
-char *nt_strerror(int error, char *buf, size_t buf_size)
-{
-    char        *lpMsgBuf;
-    char        *eol;
-
-    FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | 
-                  FORMAT_MESSAGE_FROM_SYSTEM | 
-                  FORMAT_MESSAGE_IGNORE_INSERTS,
-                  GetModuleHandle(NULL),
-                  error,
-                  MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                  (LPTSTR) &lpMsgBuf,
-                  0,
-                  NULL);
-    eol = lpMsgBuf + strlen(lpMsgBuf);
-    /* remove trailing \r\n so (%d) appears on the same line */
-    if (eol > lpMsgBuf + 1 && eol[-1] == '\n' && eol[-2] == '\r')
-        eol[-2] = '\0';
-
-    _snprintf(buf, buf_size - 1, "%s (%d)", lpMsgBuf, error);
-    LocalFree(lpMsgBuf);
-    return (buf);
-}
-
