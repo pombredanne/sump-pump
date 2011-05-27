@@ -120,6 +120,12 @@ typedef int nsort_msg_t;        /* return status & error message numbers */
 
 #define ERROR_BUF_SIZE  500   /* size of error buffer */
 
+#if defined(win_nt)
+# define LAST_ERROR     GetLastError()
+#else
+# define LAST_ERROR     errno
+#endif
+
 static int Page_size = 4096;
 
 
@@ -224,9 +230,6 @@ struct task_out
                            * empty its full buf */
 };
 
-/* index macros for pipe file descriptor arrays set by pipe() system call */
-#define READ            0
-#define WRITE           1
 
 #define INVALID_FD      (-1)
 #define PIPE_BUF_SIZE   4096
@@ -251,7 +254,13 @@ struct std_pipe
 {
     struct exec_state   *ex;
     int                 perrno;
-    int                 fds[2];
+#if defined(win_nt)
+    HANDLE              rd_h;   /* read handle */
+    HANDLE              wr_h;   /* write handle */
+#else
+    int                 rd_fd;  /* read file descriptor */
+    int                 wr_fd;  /* write file descriptor */
+#endif
 };
 
 /* per-thread struct used when pump funcs call a separate program */
@@ -347,7 +356,11 @@ struct sp_file
                                  * file_writer() */
     sp_t        sp;             /* sump pump this file */
     int         mode;           /* file access mode */
+#if defined(win_nt)
+    HANDLE      h;              /* file handle */
+#else
     int         fd;             /* file descriptor */
+#endif
     int         out_index;      /* sump pump output index (if relevant) */
     int         aio_count;      /* the max and target number of async i/o's */
     size_t      transfer_size;  /* read or write request size */
@@ -459,6 +472,41 @@ static void die(char *fmt, ...)
 }
 
 
+/* get_error_msg - place a system error message in the provided buffer
+ */
+static char *get_error_msg(int error, char *err_buf, size_t err_buf_size)
+{
+#if defined(win_nt)
+    char		*lpMsgBuf;
+    char		*eol;
+
+    if (error == 0)  /* if no error specified, get last error */
+        error = GetLastError();
+    FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | 
+                  FORMAT_MESSAGE_FROM_SYSTEM | 
+                  FORMAT_MESSAGE_IGNORE_INSERTS,
+                  GetModuleHandle(NULL),
+                  error,
+                  MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                  (LPTSTR) &lpMsgBuf,
+                  0,
+                  NULL);
+    eol = lpMsgBuf + strlen(lpMsgBuf);
+    /* remove trailing \r\n so (%d) appears on the same line */
+    if (eol > lpMsgBuf && eol[-1] == '\n' && eol[-2] == '\r')
+        eol[-2] = '\0';
+	
+    _snprintf(err_buf, err_buf_size - 1, "%s (%d)", lpMsgBuf, error);
+    LocalFree(lpMsgBuf);
+    return (err_buf);
+#else
+    if (error == 0)  /* if no error specified, get last error */
+        error = errno;
+    return (strerror_r(error, err_buf, err_buf_size));
+#endif    
+}
+
+
 /* start_error - raise an error and set error message during sp_start()
  *               but before the sump pump threads are created.
  */
@@ -560,9 +608,6 @@ void sp_raise_error(sp_t sp, int error_code, const char *fmt, ...)
 #if defined(win_nt)
 
 # include "sump_win.c"
-# define open _open
-# define read _read
-# define write _write
 
 #else
 
@@ -951,12 +996,12 @@ void *pipe_reader(void *arg)
         buf = ex->out_buf;
         out_index = 0;
     }
+    TRACE("pipe_reader%d: started\n", t->thread_index);
 
     /* if we are just writing to a whole input buffer.
      */
     if (sp->flags & SP_WHOLE_BUF)
     {
-
         /* get output buffer */
         ret = pfunc_get_out_buf(t, out_index,
                                 (void **)&buf, (size_t *)&buf_size);
@@ -971,12 +1016,28 @@ void *pipe_reader(void *arg)
         buf_bytes = 0;
         for (;;)
         {
-            len = read(pipe->fds[READ], buf + buf_bytes, buf_size - buf_bytes);
+#if defined(win_nt)
+            DWORD       size;
+            
+            if (ReadFile(pipe->rd_h, buf + buf_bytes,
+                         buf_size - buf_bytes, &size, NULL))
+                len = size;     /* success */
+            else if (GetLastError() == ERROR_BROKEN_PIPE)
+                len = 0;        /* eof */
+            else
+                len = -1;       /* failure */
+#else
+            len = read(pipe->rd_fd, buf + buf_bytes, buf_size - buf_bytes);
+#endif
             if (len == 0)
                 break;
             if (len < 0)
             {
+#if defined(win_nt)
+                pipe->perrno = GetLastError();
+#else
                 pipe->perrno = errno;
+#endif
                 buf_bytes = 0;
                 break;
             }
@@ -1011,12 +1072,28 @@ void *pipe_reader(void *arg)
         /* read from pipe and write to task output */
         for (;;)
         {
-            len = read(pipe->fds[READ], buf, PIPE_BUF_SIZE);
+#if defined(win_nt)
+            DWORD       size;
+            
+            if (ReadFile(pipe->rd_h, buf, PIPE_BUF_SIZE, &size, NULL))
+                len = size;     /* success */
+            else if (GetLastError() == ERROR_BROKEN_PIPE)
+                len = 0;        /* eof */
+            else
+                len = -1;       /* failure */
+#else
+            len = read(pipe->rd_fd, buf, PIPE_BUF_SIZE);
+#endif
+            TRACE("pipe_reader%d: read %d bytes\n", t->thread_index, (int)len);
             if (len == 0)
                 break;
             if (len < 0)
             {
+#if defined(win_nt)
+                pipe->perrno = GetLastError();
+#else
                 pipe->perrno = errno;
+#endif
                 break;
             }
             total += len;
@@ -1028,12 +1105,17 @@ void *pipe_reader(void *arg)
         }
     }
   reader_return:
+#if defined(win_nt)
+    CloseHandle(pipe->rd_h);
+#else
     pfunc_mutex_lock(t);
     {
-        close(pipe->fds[READ]);
-        pipe->fds[READ] = INVALID_FD;
+        close(pipe->rd_fd);
+        pipe->rd_fd = INVALID_FD;
     }
     pfunc_mutex_unlock(t);
+#endif
+    TRACE("pipe_reader%d: returning\n", t->thread_index);
 
     return (NULL);
 }
@@ -1056,7 +1138,15 @@ int pfunc_exec(sp_task_t t, void *unused)
     pid_t               child;
     int                 status;
     char	        errmsg[100];
+    /* just_input_files is a half-finished implementation using temporary files
+     * rather than pipes to transport input data to the external program */
     int                 just_input_files = 0;
+#if defined(win_nt)
+    DWORD               wr_size;
+    PROCESS_INFORMATION pi;
+#else
+    int                 tempfds[2];
+#endif
 
     sp = t->sp;
     ex = &sp->ex_state[ti];
@@ -1069,6 +1159,65 @@ int pfunc_exec(sp_task_t t, void *unused)
 
     if (!just_input_files)
     {
+#if defined(win_nt)
+        SECURITY_ATTRIBUTES     sa;
+        STARTUPINFOA            sui;
+        
+        sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+        sa.bInheritHandle = TRUE;
+        sa.lpSecurityDescriptor = NULL;
+
+        /* create pipe for stdin of external process */
+        if (!CreatePipe(&ex->in.rd_h, &ex->in.wr_h, &sa, 0))
+            return (pfunc_error(t, "CreatePipe() error: %s\n",
+                                get_error_msg(0, errmsg, sizeof(errmsg))));
+        /* make sure the write handle is not inherited */
+        if (!SetHandleInformation(ex->in.wr_h, HANDLE_FLAG_INHERIT, 0))
+            return (pfunc_error(t, "SetHandleInformation() error: %s\n",
+                                get_error_msg(0, errmsg, sizeof(errmsg))));
+
+        /* create pipe for stdout of external process */
+        if (!CreatePipe(&ex->out.rd_h, &ex->out.wr_h, &sa, 0))
+            return (pfunc_error(t, "CreatePipe() error: %s\n",
+                                get_error_msg(0, errmsg, sizeof(errmsg))));
+        /* make sure the read handle is not inherited */
+        if (!SetHandleInformation(ex->out.rd_h, HANDLE_FLAG_INHERIT, 0))
+            return (pfunc_error(t, "SetHandleInformation() error: %s\n",
+                                get_error_msg(0, errmsg, sizeof(errmsg))));
+
+        ZeroMemory(&sui, sizeof(STARTUPINFOA));
+        sui.cb = sizeof(STARTUPINFO);
+        sui.hStdInput = ex->in.rd_h;
+        sui.hStdOutput = ex->out.wr_h;
+        sui.hStdError = GetStdHandle(STD_ERROR_HANDLE); /* use own handle */
+        sui.dwFlags |= STARTF_USESTDHANDLES;
+
+        ZeroMemory(&pi, sizeof(PROCESS_INFORMATION));
+
+        if (!CreateProcessA(NULL, /* NULL process name forces use of cmd line
+                                   * where the PATH may be used to find exe */
+                            sp->exec_argv[0],/* command line */
+                            NULL,            /* process security attributes */
+                            NULL,            /* thread security attributes */
+                            TRUE,            /* handles are inherited */
+                            0,               /* flags */
+                            NULL,            /* environment */
+                            NULL,            /* current directory */
+                            &sui,            /* startup info */
+                            &pi))            /* process info */
+        {
+            return (pfunc_error(t, "CreateProcess() error: %s\n",
+                                get_error_msg(0, errmsg, sizeof(errmsg))));
+        }
+        CloseHandle(pi.hThread);
+
+        /* close the original write handle for external proc's stdout */
+        if (!CloseHandle(ex->out.wr_h))
+        {
+            return (pfunc_error(t, "pipe_reader, CloseHandle failure: %d\n", 
+                                GetLastError()));
+        }
+#else
         /* lock out other pump functions (even in other sump pumps)
          * and their fd opens and closes
          */
@@ -1088,23 +1237,29 @@ int pfunc_exec(sp_task_t t, void *unused)
         }
         /* use curly braces to better illustrate mutex block */
         {       
-            if (pipe(ex->in.fds) != 0)
+            if (pipe(tempfds) != 0)
             {
                 pthread_mutex_unlock(&Global_lock);
                 return (pfunc_error(t, "pipe() error: %s\n", strerror(errno)));
             }
-            if (pipe(ex->out.fds) != 0)
+            ex->in.rd_fd = tempfds[0];
+            ex->in.wr_fd = tempfds[1];
+            if (pipe(tempfds) != 0)
             {
                 pthread_mutex_unlock(&Global_lock);
                 return (pfunc_error(t, "pipe() error: %s\n", strerror(errno)));
             }
-#if defined(SUMP_PIPE_STDERR)
-            if (pipe(ex->err.fds) != 0)
+            ex->out.rd_fd = tempfds[0];
+            ex->out.wr_fd = tempfds[1];
+# if defined(SUMP_PIPE_STDERR)
+            if (pipe(tempfds) != 0)
             {
                 pthread_mutex_unlock(&Global_lock);
                 return (pfunc_error(t, "pipe() error: %s\n", strerror(errno)));
             }
-#endif
+            ex->err.rd_fd = tempfds[0];
+            ex->err.wr_fd = tempfds[1];
+# endif
             child = fork();
             if (child == -1)
             {
@@ -1116,43 +1271,43 @@ int pfunc_exec(sp_task_t t, void *unused)
                 /* current process is the newly created child */
                 int         i;
 
-                if (dup2(ex->in.fds[READ], STDIN_FILENO) == -1)
+                if (dup2(ex->in.rd_fd, STDIN_FILENO) == -1)
                 {
                     perror("dup2() for stdin");
                     exit(1);
                 }
-                close(ex->in.fds[READ]);
-                ex->in.fds[READ] = INVALID_FD;
+                close(ex->in.rd_fd);
+                ex->in.rd_fd = INVALID_FD;
 
-                if (dup2(ex->out.fds[WRITE], STDOUT_FILENO) == -1)
+                if (dup2(ex->out.wr_fd, STDOUT_FILENO) == -1)
                 {
                     perror("dup2() for stdout");
                     exit(1);
                 }
-                close(ex->out.fds[WRITE]);
-                ex->out.fds[WRITE] = INVALID_FD;
-#if defined(SUMP_PIPE_STDERR)
-                if (dup2(ex->err.fds[WRITE], STDERR_FILENO) == -1)
+                close(ex->out.wr_fd);
+                ex->out.wr_fd = INVALID_FD;
+# if defined(SUMP_PIPE_STDERR)
+                if (dup2(ex->err.wr_fd, STDERR_FILENO) == -1)
                 {
                     perror("dup2() for stderr");
                     exit(1);
                 }
-                close(ex->err.fds[WRITE]);
-                ex->err.fds[WRITE] = INVALID_FD;
-#endif
+                close(ex->err.wr_fd);
+                ex->err.wr_fd = INVALID_FD;
+# endif
                 /* close all sump-pump-end pipe file descriptors.
                  * presumably closing these red
                  */
                 for (i = 0; i < sp->num_threads; i++)
                 {
-                    if (sp->ex_state[i].in.fds[WRITE] != INVALID_FD)
-                        close(sp->ex_state[i].in.fds[WRITE]);
-                    if (sp->ex_state[i].out.fds[READ] != INVALID_FD)
-                        close(sp->ex_state[i].out.fds[READ]);
-#if defined(SUMP_PIPE_STDERR)
-                    if (sp->ex_state[i].err.fds[READ] != INVALID_FD)
-                        close(sp->ex_state[i].err.fds[READ]);
-#endif
+                    if (sp->ex_state[i].in.wr_fd != INVALID_FD)
+                        close(sp->ex_state[i].in.wr_fd);
+                    if (sp->ex_state[i].out.rd_fd != INVALID_FD)
+                        close(sp->ex_state[i].out.rd_fd);
+# if defined(SUMP_PIPE_STDERR)
+                    if (sp->ex_state[i].err.rd_fd != INVALID_FD)
+                        close(sp->ex_state[i].err.rd_fd);
+# endif
                 }
 
                 /* exec program */
@@ -1164,43 +1319,47 @@ int pfunc_exec(sp_task_t t, void *unused)
         
             /* this is the pfunc thread (and not the child process) */
             /* close the child's ends of the 3 pipes */
-            close(ex->in.fds[READ]);
-            ex->in.fds[READ] = INVALID_FD;
+            close(ex->in.rd_fd);
+            ex->in.rd_fd = INVALID_FD;
 
-            close(ex->out.fds[WRITE]);
-            ex->out.fds[WRITE] = INVALID_FD;
-#if defined(SUMP_PIPE_STDERR)
-            close(ex->err.fds[WRITE]);
-            ex->err.fds[WRITE] = INVALID_FD;
-#endif
+            close(ex->out.wr_fd);
+            ex->out.wr_fd = INVALID_FD;
+# if defined(SUMP_PIPE_STDERR)
+            close(ex->err.wr_fd);
+            ex->err.wr_fd = INVALID_FD;
+# endif
         }    
         Global_external_count++;
         pthread_mutex_unlock(&Global_lock);
+#endif
 
         /* create thread for each of stdout and stderr */
         if (pthread_create(&out_thread, NULL, pipe_reader, &ex->out) != 0)
-            return (pfunc_error(t, "pthread_create out error: %s\n",
-                                strerror_r(errno, errmsg, sizeof(errmsg))));
+            return (pfunc_error(t, "pthread_create out error: %d\n",
+                                LAST_ERROR));
 #if defined(SUMP_PIPE_STDERR)
         if (pthread_create(&err_thread, NULL, pipe_reader, &ex->err) != 0)
-            return (pfunc_error(t, "pthread_create err error: %s\n",
-                                strerror_r(errno, errmsg, sizeof(errmsg))));
+            return (pfunc_error(t, "pthread_create err error: %d\n",
+                                LAST_ERROR));
 #endif
     }
     else
     {
+#if defined(win_nt)
+#else
         char    fname[50];
         
         sprintf(fname, "sptaskinput%llu",
                 (long long unsigned int)t->task_number);
-        ex->in.fds[WRITE] = open(fname, O_WRONLY | O_CREAT | O_TRUNC, 0777);
-        if (ex->in.fds[WRITE] < 0)
+        ex->in.wr_fd = open(fname, O_WRONLY | O_CREAT | O_TRUNC, 0777);
+        if (ex->in.wr_fd < 0)
         {
             strerror_r(errno, errmsg, sizeof(errmsg));
             return(pfunc_error(t,
                                "can't open debug input file '%s': %s\n",
                                fname, errmsg));
         }
+#endif
     }
 
     /* if we are just reading a whole input buffer, not record by record.
@@ -1215,10 +1374,12 @@ int pfunc_exec(sp_task_t t, void *unused)
         if ((ret = pfunc_get_in_buf(t, (void **)&in, &in_size)) != 0)
             return (pfunc_error(t, "internal pfunc error: "
                                 "bad ret from sp_get_in_buf: %d\n", ret));
-        if (write(ex->in.fds[WRITE], in, in_size) != in_size)
-        {
-            ex->in.perrno = errno;
-        }
+#if defined(win_nt)
+        if (!WriteFile(ex->in.wr_h, in, in_size, &wr_size, NULL))
+#else
+        if (write(ex->in.wr_fd, in, in_size) != in_size)
+#endif
+            ex->in.perrno = LAST_ERROR;
     }
     else  /* the records are lines of text */
     {
@@ -1231,7 +1392,7 @@ int pfunc_exec(sp_task_t t, void *unused)
                 int     len;
                 int     copy_size;
         
-                /* buffer and write to in.fds[WRITE] */
+                /* buffer and write to in.wr_fd */
                 len = strlen(rec);
                 while (len)
                 {
@@ -1242,10 +1403,15 @@ int pfunc_exec(sp_task_t t, void *unused)
                     buf_bytes += copy_size;
                     if (buf_bytes == PIPE_BUF_SIZE)
                     {
-                        if (write(ex->in.fds[WRITE], ex->in_buf, buf_bytes) !=
+#if defined(win_nt)
+                        if (!WriteFile(ex->in.wr_h, ex->in_buf, buf_bytes,
+                                       &wr_size, NULL))
+#else
+                        if (write(ex->in.wr_fd, ex->in_buf, buf_bytes) !=
                             buf_bytes)
+#endif
                         {
-                            ex->in.perrno = errno;
+                            ex->in.perrno = LAST_ERROR;
                             buf_bytes = 0;
                             break;
                         }
@@ -1270,19 +1436,49 @@ int pfunc_exec(sp_task_t t, void *unused)
         /* flush any remainder */
         if (buf_bytes != 0)
         {
-            if (write(ex->in.fds[WRITE], ex->in_buf, buf_bytes) != buf_bytes)
-                ex->in.perrno = errno;
+#if defined(win_nt)
+            if (!WriteFile(ex->in.wr_h, ex->in_buf, buf_bytes, &wr_size, NULL))
+#else
+            if (write(ex->in.wr_fd, ex->in_buf, buf_bytes) != buf_bytes)
+#endif
+                ex->in.perrno = LAST_ERROR;
         }
     }
     
+#if defined(win_nt)
+    CloseHandle(ex->in.wr_h);
+#else
     pthread_mutex_lock(&Global_lock);
-    close(ex->in.fds[WRITE]);
-    ex->in.fds[WRITE] = INVALID_FD;
+    close(ex->in.wr_fd);
+    ex->in.wr_fd = INVALID_FD;
     Global_external_count--;
     pthread_mutex_unlock(&Global_lock);
-
+#endif
+    
     if (!just_input_files)
     {
+#if defined(win_nt)
+        DWORD   exitCode;
+        DWORD   rv;
+        
+        /* wait for external process */
+        rv = WaitForSingleObject(pi.hProcess, INFINITE);
+        if (rv != WAIT_OBJECT_0)
+            return (pfunc_error(t, "process WaitForSingleObject() ret: %d, error: %s\n",
+                                rv, get_error_msg(0, errmsg, sizeof(errmsg))));
+        if (!GetExitCodeProcess(pi.hProcess, &exitCode))
+            return (pfunc_error(t, "GetExitCodeProcess() error: %s\n",
+                                get_error_msg(0, errmsg, sizeof(errmsg))));
+        TRACE("pfunc_exec%d: ext proc exited with: %d\n",
+              t->thread_index, exitCode);
+        if (exitCode != 0)
+        {
+            pfunc_error(t,
+                        "process '%s' instance %llu exited with status: %d\n",
+                        sp->exec_argv[0], t->task_number, exitCode);
+        }
+        CloseHandle(pi.hProcess);
+#else
         /* if error writing to pipe and is not broken pipe error */
         if (ex->in.perrno != 0 && ex->in.perrno != EPIPE)
         {
@@ -1324,6 +1520,7 @@ int pfunc_exec(sp_task_t t, void *unused)
                         "process '%s' instance %llu exited with status: %d\n",
                         sp->exec_argv[0], t->task_number, WEXITSTATUS(status));
         }
+#endif
 
         /* wait for stdout thread to end */
         pthread_join(out_thread, NULL);
@@ -1331,7 +1528,7 @@ int pfunc_exec(sp_task_t t, void *unused)
               t->thread_index, ex->out.perrno);
         if (ex->out.perrno != 0)
         {
-            strerror_r(ex->out.perrno, errmsg, sizeof(errmsg));
+            get_error_msg(ex->out.perrno, errmsg, sizeof(errmsg));
             TRACE("pfunc_exec%d: out thread exited on error: %d, %s\n",
                   t->thread_index, ex->out.perrno, errmsg);
             pfunc_error(t, "pipe stdout read error: %s\n", errmsg);
@@ -1343,7 +1540,7 @@ int pfunc_exec(sp_task_t t, void *unused)
               t->thread_index, ex->err.perrno);
         if (ex->err.perrno != 0)
         {
-            strerror_r(ex->err.perrno, errmsg, sizeof(errmsg));
+            get_error_msg(ex->err.perrno, errmsg, sizeof(errmsg));
             TRACE("pfunc_exec%d: error thread exited on error: %d, %s\n",
                   t->thread_index, ex->err.perrno, errmsg);
             pfunc_error(t, "pipe stderr read error: %s\n", errmsg);
@@ -1355,7 +1552,7 @@ int pfunc_exec(sp_task_t t, void *unused)
 }
 
 
-/* file_reader_test - main routine for a file reader thread using 
+/* file_reader_test - test routine for a file reader thread using 
  *                            normal read() calls into an intermediate
  *                            buffer followed by writes into the sump pump.
  */
@@ -1374,13 +1571,24 @@ static void *file_reader_test(void *arg)
     /* keep looping until there is no additional input */
     for (;;)
     {
+#if defined(win_nt)
+        DWORD   rlen;
+        
+        if (ReadFile(sp_src->h, read_buf, sp_src->transfer_size, &rlen, NULL))
+            size = rlen;        /* success */
+        else if (GetLastError() == ERROR_BROKEN_PIPE)
+            size = 0;           /* eof */
+        else
+            size = -1;          /* failure */
+#else
         size = read(sp_src->fd, read_buf, (unsigned int)sp_src->transfer_size);
+#endif
         if (size < 0)
         {
             sp_raise_error(sp, SP_FILE_READ_ERROR,
                            "%s: read() failure: %s\n",
                            sp_src->fname,
-                           strerror_r(errno, err_buf, sizeof(err_buf)));
+                           get_error_msg(0, err_buf, sizeof(err_buf)));
             break;
         }
         if (sp_write_input(sp, read_buf, size) != size)
@@ -1409,9 +1617,12 @@ static void *file_reader_buffered(void *arg)
     sp_file_t           sp_src = (sp_file_t)arg;
     sp_t                sp = sp_src->sp;
     char                err_buf[200];
+#if defined(win_nt)
+    DWORD               rlen;
+#endif
 
     TRACE("file_reader_buffered starting\n");
-
+            
     /* keep looping until there is no additional input */
     for (index = 0; ; index++)
     {
@@ -1425,15 +1636,27 @@ static void *file_reader_buffered(void *arg)
             /* limit request size to 2GB */
             if (request > 0x80000000)
                 request = 0x80000000;
+            if (sp_src->transfer_size != 0 && request > sp_src->transfer_size)
+                request = sp_src->transfer_size;
+#if defined(win_nt)
+            if (ReadFile(sp_src->h, read_buf + filled_bytes,
+                         (DWORD)request, &rlen, NULL))
+                size = rlen;    /* success */
+            else if (GetLastError() == ERROR_BROKEN_PIPE)
+                size = 0;       /* eof */
+            else
+                size = -1;      /* failure */
+#else
             size = read(sp_src->fd, read_buf + filled_bytes,
                         (unsigned int)request);
+#endif
             TRACE("file_reader: read %d bytes\n", (int)size);  
             if (size < 0)
             {
                 sp_raise_error(sp, SP_FILE_READ_ERROR,
                                "%s: read() failure: %s\n",
                                sp_src->fname,
-                               strerror_r(errno, err_buf, sizeof(err_buf)));
+                               get_error_msg(0, err_buf, sizeof(err_buf)));
                 filled_bytes = 0;
                 break;
             }
@@ -1463,7 +1686,12 @@ static void *file_writer_buffered(void *arg)
     ssize_t             size;
     sp_file_t           sp_dst = (sp_file_t)arg;
     sp_t                sp = sp_dst->sp;
+#if defined(win_nt)
+    HANDLE              h = sp_dst->h;
+    DWORD               wr_size;
+#else
     int                 fd = sp_dst->fd;
+#endif      
     int                 out_index = sp_dst->out_index;
     char                err_buf[200];
     
@@ -1482,12 +1710,16 @@ static void *file_writer_buffered(void *arg)
             break;
         }
         TRACE("file_writer: writing %d bytes\n", size);  
+#if defined(win_nt)
+        if (!WriteFile(h, buf, size, &wr_size, NULL))
+#else
         if (write(fd, buf, (unsigned int)size) != size)
+#endif
         {
             sp_raise_error(sp, SP_FILE_WRITE_ERROR,
                            "%s: write() failure: %s\n",
                            sp_dst->fname,
-                           strerror_r(errno, err_buf, sizeof(err_buf)));
+                           get_error_msg(0, err_buf, sizeof(err_buf)));
             sp_dst->error_code = SP_FILE_WRITE_ERROR;
             break;
         }
@@ -1685,7 +1917,7 @@ static void *file_writer_direct(void *arg)
     {
         sp_raise_error(sp, SP_MEM_ALLOC_ERROR,
                        "VirtualAlloc() failure: %s\n",
-                       nt_strerror(GetLastError(), err_buf, sizeof(err_buf)));
+                       get_error_msg(0, err_buf, sizeof(err_buf)));
         sp_dst->error_code = SP_MEM_ALLOC_ERROR;
         return NULL;
     }
@@ -2134,6 +2366,27 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods, unsigned flags)
             reader_main = file_reader_buffered;
     }
 
+#if defined(win_nt)
+    if (strcmp(sp_src->fname, "<stdin>") == 0)
+    {
+        sp_src->h = GetStdHandle(STD_INPUT_HANDLE);
+        if (sp_src->transfer_size == 0)
+            /* there is a read size limit for keyboard input, but is this it?*/
+            sp_src->transfer_size = 8192;
+    }
+    else
+    {
+        sp_src->h = CreateFile(sp_src->fname,
+                               GENERIC_READ,
+                               FILE_SHARE_READ,
+                               NULL,
+                               OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL,
+                               NULL);
+        if (sp_src->h == INVALID_HANDLE_VALUE)
+            return (NULL);
+    }
+#else
     if (strcmp(sp_src->fname, "<stdin>") == 0)
         sp_src->fd = 0;
     else
@@ -2142,6 +2395,7 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods, unsigned flags)
         if (sp_src->fd < 0)
             return (NULL);
     }
+#endif
     
     /* create reader thread */
     if (pthread_create(&sp_src->thread, NULL, reader_main, sp_src) != 0)
@@ -2153,13 +2407,14 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods, unsigned flags)
 /* sp_open_file_dst - use the specified file as the output for the
  *                    specified output of the specified sump pump.
  */
-sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods, unsigned flags)
+sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods)
 {
     sp_file_t           sp_dst;
     int                 ret;
     char                *comma_char;
     int                 fname_len;
     void                *(*writer_main)(void *);
+    unsigned            flags = 0;
 
     if ((sp_dst = (sp_file_t)calloc(1, sizeof(struct sp_file))) == NULL)
         return (NULL);
@@ -2195,16 +2450,36 @@ sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods, 
             sp_dst->transfer_size = Default_rw_test_size;
     }
 
+#if defined(win_nt)
+    if (strcmp(sp_dst->fname, "<stdout>") == 0)
+        sp_dst->h = GetStdHandle(STD_OUTPUT_HANDLE);
+    else if (strcmp(sp_dst->fname, "<stderr>") == 0)
+        sp_dst->h = GetStdHandle(STD_ERROR_HANDLE);
+    else
+    {
+        sp_dst->h = CreateFile(sp_dst->fname,
+                               GENERIC_WRITE,
+                               FILE_SHARE_READ,
+                               NULL,
+                               OPEN_ALWAYS,
+                               FILE_ATTRIBUTE_NORMAL,
+                               NULL);
+        if (sp_dst->h == INVALID_HANDLE_VALUE)
+            return (NULL);
+    }
+#else
     if (strcmp(sp_dst->fname, "<stdout>") == 0)
         sp_dst->fd = 1;
     else if (strcmp(sp_dst->fname, "<stderr>") == 0)
         sp_dst->fd = 2;
     else
     {
-        sp_dst->fd = open(sp_dst->fname, flags | DFLT_TXTBIN, 0777);
+        flags |= O_WRONLY | O_CREAT | O_TRUNC | DFLT_TXTBIN;
+        sp_dst->fd = open(sp_dst->fname, flags, 0777);
         if (sp_dst->fd < 0)
             return (NULL);
     }
+#endif
     sp_dst->out_index = out_index;
     if (sp_dst->transfer_size == 0)
         sp_dst->transfer_size =
@@ -3922,12 +4197,41 @@ static void get_exec_args(sp_t sp, char **ep)
     char        *p, *begin;
     int         i, cnt;
     
+#if defined(win_nt)
+    int         cmdlen;
+    char        *cmdline;
+    
+    for (p = *ep, cnt = 0; *p != '\0'; p++)
+        if (*p == '\n')
+            cnt++;      /* count newlines */
+    sp->exec_argv = (char **)calloc(2, sizeof(char *));
+    if (sp->exec_argv == NULL)
+    {
+        sp->error_code = SP_MEM_ALLOC_ERROR;
+        return;
+    }
+    /* allocate space for each character plus 2 double-quote chars per arg */
+    cmdline = sp->exec_argv[0] =
+        (char *)calloc((p - *ep) + 2 * (cnt + 1), sizeof(char));
+    if (cmdline == NULL)
+    {
+        sp->error_code = SP_MEM_ALLOC_ERROR;
+        return;
+    }
+    cmdlen = 0;
+#endif
+    
     p = *ep;
     i = 0;
     cnt = 0;
     for (;;)
     {
-#define SP_ARGV_INCR    5
+#if defined(win_nt)
+        int     need_quotes = FALSE;
+        if (i != 0)
+            cmdline[cmdlen++] = ' ';   /* add space between args */
+#else           /* grow argv for non-Windows systems */
+# define SP_ARGV_INCR    5
         if (i == 0)
         {
             cnt = SP_ARGV_INCR;
@@ -3944,10 +4248,25 @@ static void get_exec_args(sp_t sp, char **ep)
             sp->error_code = SP_MEM_ALLOC_ERROR;
             return;
         }
-
+#endif
         begin = p;
         while (*p != '\n' && *p != '\0')
+        {
+#if defined(win_nt)
+            if (*p == ' ')
+                need_quotes = TRUE;
+#endif
             p++;
+        }
+
+#if defined(win_nt)
+        if (need_quotes)
+            cmdline[cmdlen++] = '"';   /* begin double-quote */
+        memcpy(cmdline + cmdlen, begin, p - begin);
+        cmdlen += p - begin;
+        if (need_quotes)
+            cmdline[cmdlen++] = '"';   /* end double-quote */
+#else     
         sp->exec_argv[i] = calloc(sizeof(char), p - begin + 1);
         if (sp->exec_argv[i] == NULL)
         {
@@ -3956,14 +4275,20 @@ static void get_exec_args(sp_t sp, char **ep)
         }
         memcpy(sp->exec_argv[i], begin, p - begin);
         sp->exec_argv[i][begin - p] = '\0';
+        TRACE("argv[%d]: %s\n", i, sp->exec_argv[i]);
+#endif
         if (*p == '\n')
             p++;
         if (*p == '\0')
             break;
         i++;
     }
-
     *ep = p;
+
+#if defined(win_nt)
+    cmdline[cmdlen] = '\0';
+    TRACE("cmdline: %s\n", cmdline);
+#endif
 }
 
 
@@ -4029,7 +4354,7 @@ static void get_exec_args(sp_t sp, char **ep)
  *                                        defined, the output should be read
  *                                        either by calls to sp_read_output()
  *                                        or by sp_start_link().
- *                    -RAW or -WHOLE or   Processing is not done by input
+ *                    -WHOLE or           Processing is not done by input
  *                      -WHOLE_BUF        records so not input record type
  *                                        should be defined.  Instead,
  *                                        processing is done by whole input
@@ -4055,6 +4380,7 @@ int sp_start(sp_t *caller_sp,
     int                 ret;
     char                *p;
     int                 index;
+    char                err_buf[200];
     
     if (TraceFp == NULL &&
         (s = getenv("SUMP_PUMP_TRACE")) != NULL &&
@@ -4271,8 +4597,7 @@ int sp_start(sp_t *caller_sp,
                 }
                 sp->num_outputs = num_outputs;
             }
-            else if (scan("RAW", &p) ||
-                     scan("WHOLE_BUF", &p) || scan("WHOLE", &p))
+            else if (scan("WHOLE_BUF", &p) || scan("WHOLE", &p))
             {
                 sp->flags &= ~SP_UTF_8;
                 sp->flags |= SP_WHOLE_BUF;
@@ -4363,7 +4688,7 @@ int sp_start(sp_t *caller_sp,
             else /* default to using 2x the input buffer size */
                 sp->out[i].buf_size = 2 * sp->in_buf_size;
         }
-        /* fprintf(stderr, "out %d: %d\n", i, (int)sp->out[i].buf_size); */
+        TRACE("out %d: %d\n", i, (int)sp->out[i].buf_size);
     }
 
     /* alloc rec output buffers for each task */
@@ -4419,8 +4744,10 @@ int sp_start(sp_t *caller_sp,
         /* use own internal pump function to pipe to/from external process */
         sp->pump_func = pfunc_exec;
 
+#if !defined(win_nt)
         /* ignore broken pipe signal, failed write()'s return with error */
         signal(SIGPIPE, SIG_IGN);
+#endif
     }
     else if (sp->pump_func == NULL)
     {
@@ -4449,15 +4776,12 @@ int sp_start(sp_t *caller_sp,
         if (sp->flags & SP_EXEC)
         {
             sp->ex_state[i].in.ex = &sp->ex_state[i];
-            sp->ex_state[i].in.fds[0] = INVALID_FD;
-            sp->ex_state[i].in.fds[1] = INVALID_FD;
+            sp->ex_state[i].in.rd_fd = sp->ex_state[i].in.wr_fd = INVALID_FD;
             sp->ex_state[i].out.ex = &sp->ex_state[i];
-            sp->ex_state[i].out.fds[0] = INVALID_FD;
-            sp->ex_state[i].out.fds[1] = INVALID_FD;
+            sp->ex_state[i].out.rd_fd = sp->ex_state[i].out.wr_fd = INVALID_FD;
 #if defined(SUMP_PIPE_STDERR)
             sp->ex_state[i].err.ex = &sp->ex_state[i];
-            sp->ex_state[i].err.fds[0] = INVALID_FD;
-            sp->ex_state[i].err.fds[1] = INVALID_FD;
+            sp->ex_state[i].err.rd_fd = sp->ex_state[i].err.wr_fd = INVALID_FD;
 #endif
         }
     }
@@ -4467,12 +4791,11 @@ int sp_start(sp_t *caller_sp,
         if (sp->out[i].file != NULL)
         {
             /* start an output file connection */
-            sp->out[i].file_sp =
-                sp_open_file_dst(sp, i, sp->out[i].file,
-                                 O_WRONLY | O_CREAT | O_TRUNC);
+            sp->out[i].file_sp = sp_open_file_dst(sp, i, sp->out[i].file);
             if (sp->out[i].file_sp == NULL)
             {
-                perror(sp->out[i].file);
+                start_error(sp, "%s: %s\n", sp->out[i].file,
+                            get_error_msg(0, err_buf, sizeof(err_buf)));
                 return (SP_FILE_OPEN_ERROR);
             }
         }
@@ -4484,7 +4807,8 @@ int sp_start(sp_t *caller_sp,
         sp->in_file_sp = sp_open_file_src(sp, sp->in_file, O_RDONLY);
         if (sp->in_file_sp == NULL)
         {
-            perror(sp->in_file);
+            start_error(sp, "%s: %s\n", sp->in_file,
+                        get_error_msg(0, err_buf, sizeof(err_buf)));
             return (SP_FILE_OPEN_ERROR);
         }
     } 
