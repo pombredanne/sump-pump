@@ -153,7 +153,7 @@ const char *sp_get_id(void);
  *                                        defined, the output should be read
  *                                        either by calls to sp_read_output()
  *                                        or by sp_start_link().
- *                    -RAW or -WHOLE or   Processing is not done by input
+ *                    -WHOLE or           Processing is not done by input
  *                      -WHOLE_BUF        records so not input record type
  *                                        should be defined.  Instead,
  *                                        processing is done by whole input
@@ -271,7 +271,7 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname, unsigned flags);
 /* sp_open_file_dst - use the specified file as the output for the
  *                    specified output of the specified sump pump.
  */
-sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname, unsigned flags);
+sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname);
 
 
 /* sp_file_wait - wait for the specified file connection to complete.
