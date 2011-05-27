@@ -73,7 +73,7 @@ char Sump_usage[] =
     "                      buffer size, but it can potentially result in\n"
     "                      loss of parallelism.\n"
     "\n"
-    "  -RAW or -WHOLE or   Overrides the default input record type of ascii\n"
+    "  -WHOLE or           Overrides the default input record type of ascii\n"
     "    -WHOLE_BUF        or utf-8 records delimited by newline character.\n"
     "                      Instead, the input is treated as raw data and\n"
     "                      the partitioning is done strictly by the input\n"
