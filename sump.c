@@ -1033,11 +1033,7 @@ void *pipe_reader(void *arg)
                 break;
             if (len < 0)
             {
-#if defined(win_nt)
-                pipe->perrno = GetLastError();
-#else
-                pipe->perrno = errno;
-#endif
+                pipe->perrno = LAST_ERROR;
                 buf_bytes = 0;
                 break;
             }
@@ -1089,11 +1085,7 @@ void *pipe_reader(void *arg)
                 break;
             if (len < 0)
             {
-#if defined(win_nt)
-                pipe->perrno = GetLastError();
-#else
-                pipe->perrno = errno;
-#endif
+                pipe->perrno = LAST_ERROR;
                 break;
             }
             total += len;
