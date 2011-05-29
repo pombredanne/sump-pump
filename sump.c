@@ -763,15 +763,15 @@ int sp_start_sort(sp_t *caller_sp,
                   char *def_fmt,
                   ...)
 {
-    int         ret;
-    char        *def_plus = NULL;
-    sp_t        sp;
-    size_t      def_len;
-    char        *def;
-    char        thread_drctv[30];
-    char        *p;
+    int                 ret;
+    char                *def_plus = NULL;
+    sp_t                sp;
+    size_t              def_len;
+    char                *def;
+    char                thread_drctv[30];
+    unsigned char       *p;
 # if defined(win_nt)
-    SYSTEM_INFO si;
+    SYSTEM_INFO         si;
 # endif
 
     *caller_sp = NULL;  /* assume the worst for now */
@@ -839,7 +839,7 @@ int sp_start_sort(sp_t *caller_sp,
     strcat(def_plus, STAT_DRCTV);
 
     /* check for input file declaration */
-    for (p = def_plus; *p != '\0'; p++)
+    for (p = (unsigned char *)def_plus; *p != '\0'; p++)
     {
         if (p[0] == '-' || p[0] == '/')
         {
@@ -2223,11 +2223,11 @@ static int64_t get_scale(char **caller_p)
  */
 static int scan(char *kw, char **dp)
 {
-    char        *kp;
-    char        *p;
+    unsigned char       *kp;
+    unsigned char       *p;
 
-    kp = kw;
-    p = *dp;
+    kp = (unsigned char *)kw;
+    p = *(unsigned char **)dp;
     
     /* while we haven't hit the end of the keyword or the end of the
      * definition string, and
@@ -2253,7 +2253,7 @@ static int scan(char *kw, char **dp)
          !((toupper(*p) >= 'A' && toupper(*p) <= 'Z') || *p == '_')))
     {
         /* update definition pointer */
-        *dp = p;
+        *dp = (char *)p;
         return TRUE;
     }
     else
@@ -4143,7 +4143,7 @@ static const char *get_string_arg(char **caller_p)
 
     /* scan string up to the next white space character */
     p = begin_p;
-    while (!isspace(*p) && *p != '\0')
+    while (!isspace(*(unsigned char *)p) && *p != '\0')
         p++;
     *caller_p = p;
 
@@ -4445,7 +4445,8 @@ int sp_start(sp_t *caller_sp,
         p = args;
         for (;;)
         {
-            while (isspace(*p))    /* ignore leading white space chars */
+            /* ignore leading white space chars */
+            while (isspace(*(unsigned char *)p))
                 p++;
             if (*p == '\0')
                 break;
