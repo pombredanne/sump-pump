@@ -33,10 +33,10 @@ $(LIB): sump.o
 # most CPU use tends to be done by pump functions.
 #
 sump.o: sump.c sump.h sumpversion.h
-	gcc -c -fPIC $(CFLAGS) -g sump.c
+	gcc -c -fPIC $(CFLAGS) -Wno-char-subscripts -g sump.c
 
 sump: sump.o main.c sump.h sumpversion.h
-	gcc -g -o sump main.c sump.o -lpthread -ldl -lrt
+	gcc -g $(CFLAGS) -o sump main.c sump.o -lpthread -ldl -lrt
 
 sumpversion.h: sump.c sump.h
 	(echo -n 'static char *sp_version = "'; echo -n $(RELEASE); echo -n ', svn: '; svnversion -n; echo '";') > sumpversion.h
@@ -119,7 +119,7 @@ billing_input.txt billing_correct_output.txt:
 	@echo warning: generating billing_input.txt takes a long time
 	genbilling.py 1000000 | sort -k 5,5 -t , > billing_input.txt
 
-sortoutput.txt: gensort
+sortoutput.txt: 
 	gensort 10000000 sortinput.txt
 	@echo warning: this sort takes a long time
 	(LC_ALL=C; export LC_ALL; sort sortinput.txt -o sortoutput.txt)
