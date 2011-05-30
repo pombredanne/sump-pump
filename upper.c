@@ -37,12 +37,12 @@
 
 int uppercase_while(sp_task_t t, void *unused)
 {
-    char        *rec;
+    unsigned char       *rec;
         
     /* for each record in the task input */
     while (pfunc_get_rec(t, &rec) > 0)
     {
-        char    *p;
+        unsigned char   *p;
 
         for (p = rec; *p != '\0'; p++)
             *p = toupper(*p);
@@ -53,9 +53,9 @@ int uppercase_while(sp_task_t t, void *unused)
 
 int uppercase_justone(sp_task_t t, void *unused)
 {
-    char        *rec;
-    char        *p;
-    int         ret;
+    unsigned char       *rec;
+    unsigned char       *p;
+    int                 ret;
 
     /* get just one input record and force sump pump infrastructure to
      * call this pump function again to get next record in the task
