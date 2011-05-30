@@ -39,13 +39,13 @@
  */
 int uppercase(sp_task_t t, void *unused)
 {
-    char        *in;
-    size_t      in_size;
-    char        *p_in;
-    char        *out;
-    size_t      out_size;
-    char        *p_out;
-    int         status;
+    unsigned char       *in;
+    size_t              in_size;
+    unsigned char       *p_in;
+    unsigned char       *out;
+    size_t              out_size;
+    unsigned char       *p_out;
+    int                 status;
         
     if ((status = pfunc_get_in_buf(t, (void **)&in, &in_size)) != 0)
         return (pfunc_error(t,
