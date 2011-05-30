@@ -2,7 +2,7 @@
 #
 # $Revision$
 # 
-# This Makefile currently only works for x86 and x64 Linux
+# This Makefile currently only works for x86 and x64 Linux, and Cygwin
 #
 
 include Make.version
@@ -19,6 +19,13 @@ PERF_FILES=lookupref.txt lookupin.txt spgzipinput billing_input.txt \
 
 CFLAGS=-Wall
 LIB=libsump.so.1
+UNAME := $(shell uname -s)
+
+ifeq ($(UNAME),Linux)
+PIC=-fPIC
+else
+PIC=
+endif
 
 default: $(LIB) sump
 
@@ -33,7 +40,7 @@ $(LIB): sump.o
 # most CPU use tends to be done by pump functions.
 #
 sump.o: sump.c sump.h sumpversion.h
-	gcc -c -fPIC $(CFLAGS) -Wno-char-subscripts -g sump.c
+	gcc -c $(PIC) $(CFLAGS) -g sump.c
 
 sump: sump.o main.c sump.h sumpversion.h
 	gcc -g $(CFLAGS) -o sump main.c sump.o -lpthread -ldl -lrt
