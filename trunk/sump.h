@@ -117,23 +117,20 @@ const char *sp_get_id(void);
  *                                        should be written into the sump pump
  *                                        either by calls to sp_write_input()
  *                                        or sp_start_link()
- *                    -IN_BUF_SIZE=%d[k,m,g] Overrides default input buffer
+ *                    -IN_BUF_SIZE=%d{k,m,g} Overrides default input buffer
  *                                        size (256kb). If a 'k', 'm' or 'g'
  *                                        suffix is specified, the specified
  *                                        size is multiplied by 2^10, 2^20 or
  *                                        2^30 respectively.
  *                    -IN_BUFS=%d         Overrides default number of input
  *                                        buffers (the number of tasks).
- *                    -OUTPUTS=%d         Overrides default number of output
- *                                        streams (1)
- *                    -TASKS=%d           Overrides default number of output
- *                                        tasks (3x the number of threads).
- *                    -THREADS=%d         Overrides default number of threads
- *                                        that are used to execute the pump
- *                                        function in parallel. The default is
- *                                        the number of logical processors in
- *                                        the system.
- *                    -OUT_BUF_SIZE[%d]=%d[x,k,m,g] Overrides default output
+ *                    -OUT[%d]=%s or -OUT_FILE[%d]=%s  The output file name for
+ *                                        the specified output index, or output
+ *                                        0 if no index is specified.  If not 
+ *                                        defined, the output should be read
+ *                                        either by calls to sp_read_output()
+ *                                        or by sp_start_link().
+ *                    -OUT_BUF_SIZE[%d]=%d{x,k,m,g} Overrides default output
  *                                        buffer size (2x the input buf size)
  *                                        for the specified output index, or
  *                                        output 0 if no index is specified.
@@ -147,17 +144,8 @@ const char *sp_get_id(void);
  *                                        exceeds the output buffer size, but
  *                                        it can potentially result in loss
  *                                        of parallelism.
- *                    -OUT[%d]=%s or -OUT_FILE[%d]=%s  The output file name for
- *                                        the specified output index, or output
- *                                        0 if no index is specified.  If not 
- *                                        defined, the output should be read
- *                                        either by calls to sp_read_output()
- *                                        or by sp_start_link().
- *                    -WHOLE or           Processing is not done by input
- *                      -WHOLE_BUF        records so not input record type
- *                                        should be defined.  Instead,
- *                                        processing is done by whole input
- *                                        buffers.
+ *                    -OUTPUTS=%d         Overrides default number of output
+ *                                        streams (1).
  *                    -REC_SIZE=%d        Defines the input record size in 
  *                                        bytes. The record contents need not 
  *                                        be ascii nor delimited by a newline
@@ -165,7 +153,29 @@ const char *sp_get_id(void);
  *                                        must consist of ascii or utf-8
  *                                        characters and be terminated by a
  *                                        newline.
- *      ...           potential subsequent arguments to prior arg_fmt
+ *                    -TASKS=%d           Overrides default number of output
+ *                                        tasks (3x the number of threads).
+ *                    -THREADS=%d         Overrides default number of threads
+ *                                        that are used to execute the pump
+ *                                        function in parallel. The default is
+ *                                        the number of logical processors in
+ *                                        the system.
+ *                    -WHOLE or           Processing is not done by input
+ *                      -WHOLE_BUF        records so not input record type
+ *                                        should be defined.  Instead,
+ *                                        processing is done by whole input
+ *                                        buffers.
+ *                    [external_program_name external_program_arguments]
+ *                                        The name of an external program and
+ *                                        its arguments. The program name
+ *                                        cannot start with the '-' character.
+ *                                        The external program name and its 
+ *                                        arguments must be last in the
+ *                                        arg_fmt string. If the program name
+ *                                        does not include a path, the PATH
+ *                                        environment variable will be used
+ *                                        to find it.
+ *      ...           potential subsequent arguments to arg_fmt
  */
 int sp_start(sp_t *sp, sp_pump_t pump_func, char *arg_fmt, ...);
 
