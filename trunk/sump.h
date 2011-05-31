@@ -98,7 +98,9 @@ const char *sp_get_id(void);
  *                    identifier that will be used in as the first argument
  *                    to all subsequent sp_*() calls.
  *      pump_func -   Pointer to pump function that will be called by
- *                    multiple sump pump threads at once.
+ *                    multiple sump pump threads at once. If an external
+ *                    program name is specified in the arg_fmt string, this
+ *                    parameter can and must be NULL.
  *      arg_fmt -     Printf-format-like string that can be used with
  *                    subsequent arguments as follows:
  *                    -ASCII or -UTF_8    Input records are ascii/utf-8 
