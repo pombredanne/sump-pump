@@ -1,6 +1,14 @@
 /* sump.h - SUMP Pump(TM) SMP/CMP parallel data pump library
  *          SUMP Pump is a trademark of Ordinal Technology Corp
  *
+ * SUMP (Scale Up MultiProcessor) Pump is an executable program and
+ * subroutine library that allows programmers to quickly take advantage
+ * of multiple processors in a computer system. The sump pump program,
+ * sump, can run multiple instances of a separate program to parallelize
+ * its processing.  The sump pump library allows programmers to write
+ * subroutines that are automatically parallelized by the sump pump
+ * infrastructure.
+ *
  * $Revision$
  *
  * Copyright (C) 2010 - 2011, Ordinal Technology Corp, http://www.ordinal.com
@@ -80,6 +88,23 @@ typedef struct sp_link *sp_link_t;
  */
 typedef int (*sp_pump_t)(sp_task_t t, void *arg);
 
+/* SUMP Pump Library
+ * -----------------
+ *
+ * The sump pump library facilitates the automatic parallelization of
+ * either (1) a programmer-defined function that reads input records and
+ * writes output records (a pump function or pump func), or (2) an
+ * external program that reads its standard input and writes to its
+ * standard output.
+ *
+ * The sump pump API consists of functions that can be called by the
+ * host program, and the functions that can be called by the pump
+ * functions.
+ */
+
+/* Library Functions for Host Program
+ * ----------------------------------
+ */
 
 /* sp_get_version - get the subversion version for sump pump
  */
@@ -178,6 +203,8 @@ const char *sp_get_id(void);
  *                                        environment variable will be used
  *                                        to find it.
  *      ...           potential subsequent arguments to arg_fmt
+ *
+ * Returns: SP_OK or a sump pump error code
  */
 int sp_start(sp_t *sp, sp_pump_t pump_func, char *arg_fmt, ...);
 
@@ -209,6 +236,8 @@ const char *sp_argv_to_str(char *argv[], int argc);
  *                               are the same as in the previous record.
  *                               If no key number is specified, all keys
  *                               are examined for a match condition.
+ *
+ * Returns: SP_OK or a sump pump error code
  */
 int sp_start_sort(sp_t *sp,
                   char *def_fmt,
@@ -228,18 +257,25 @@ const char *sp_get_nsort_version(void);
 
 /* sp_link - start a link/connection between an output
  *           of a sump pump to the input of another sump pump.
+ *
+ * Returns: SP_OK or a sump pump error code
  */
 int sp_link(sp_t out_sp, unsigned out_index, sp_t in_sp);
 
 
 /* sp_write_input - write data that is the input to a sump pump.
  *                  A write size of 0 indicates input EOF.
+ *
+ * Returns: the amount of data written. If this is not the same as the
+ *          requested write size, an error has occurred.
  */
 ssize_t sp_write_input(sp_t sp, void *buf, ssize_t size);
 
 
 /* sp_get_in_buf - get a pointer to an input buffer that an external
  *                 thread can fill with input data.
+ *
+ * Returns: SP_OK or a sump pump error code
  */
 int sp_get_in_buf(sp_t sp, uint64_t index, void **buf, size_t *size);
 
@@ -248,40 +284,57 @@ int sp_get_in_buf(sp_t sp, uint64_t index, void **buf, size_t *size);
  *                       pump's input buffer by an external thread.
  *                       This function should only be used by first
  *                       calling sp_get_in_buf().
+ *
+ * Returns: SP_OK or a sump pump error code
  */
 int sp_put_in_buf_bytes(sp_t sp, uint64_t index, size_t size, int eof);
 
 
 /* sp_read_output - read bytes from a specified output of the specified
  *                  sump pump.
+ *
+ * Returns: The number of bytes read.  If 0, then EOF has occurred.
+ *          If negative, an error has occurred.
  */
 ssize_t sp_read_output(sp_t sp, unsigned index, void *buf, ssize_t size);
 
 
 /* sp_get_error - get the error code of a sump pump.
+ *
+ * Returns: SP_OK if no error has occurred, otherwise the error code.
  */
 int sp_get_error(sp_t sp);
 
 
 /* sp_wait - can be called by an external thread, e.g. the thread that
  *           called sp_start(), to wait for all sump pump activity to cease.
+ *
+ * Returns: SP_OK or a sump pump error code
  */
 int sp_wait(sp_t sp);
 
 
 /* sp_open_file_src - use the specified file as the input for the
  *                    specified sump pump.
+ *
+ * Returns: NULL if an error occurs in opening the file, otherwise
+ *          a valid sump pump file structure.
  */
 sp_file_t sp_open_file_src(sp_t sp, const char *fname, unsigned flags);
 
 
 /* sp_open_file_dst - use the specified file as the output for the
  *                    specified output of the specified sump pump.
+ *
+ * Returns: NULL if an error occurs in opening the file, otherwise
+ *          a valid sump pump file structure.
  */
 sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname);
 
 
 /* sp_file_wait - wait for the specified file connection to complete.
+ *
+ * Returns: SP_OK or a sump pump error code
  */
 int sp_file_wait(sp_file_t sp_file);
 
@@ -291,23 +344,40 @@ int sp_file_wait(sp_file_t sp_file);
 const char *sp_get_error_string(sp_t sp, int error_code);
 
 
-/* BEGIN of functions that can be called from a pump function.
- * Note that these functions all take a task handle as the first argument.
+/* Library Functions for Pump Functions
+ * ------------------------------------
+ *
+ * The API calls specific to pump functions all take as an argument the
+ * sp_task_t data type that is passed to the pump function by the sump
+ * pump infrastructure.
  *
  * "Make my funk the P.Funk, I wants to get funked up." - George Clinton
  */
+
 /* pfunc_get_rec - get a pointer to the next input record for a pump function.
+ *                 The sump pump infrastructure allocates the record buffers
+ *                 and modifies the pointer-to-a-pointer argument to point to
+ *                 the buffer. If the record type is text, a null character
+ *                 will terminate the record.
+ *
+ * Returns: 0 if no more records are in the sump pump task input, otherwise
+ *          the number bytes in the record not including the terminating null
+ *          character.
  */
 size_t pfunc_get_rec(sp_task_t t, void *ptr_to_rec_ptr);
 
 
 /* pfunc_get_in_buf - get a pointer to the input buffer for a pump function.
+ *
+ * Returns: SP_OK or a sump pump error code
  */
 int pfunc_get_in_buf(sp_task_t t, void **buf, size_t *size);
 
 
 /* pfunc_get_out_buf - get a pointer to an output buffer and its size for
  *                     a pump function.
+ *
+ * Returns: SP_OK or a sump pump error code
  */
 int pfunc_get_out_buf(sp_task_t t, unsigned out_index, void **buf, size_t *size);
 
@@ -315,6 +385,8 @@ int pfunc_get_out_buf(sp_task_t t, unsigned out_index, void **buf, size_t *size)
 /* pfunc_put_out_buf_bytes - flush bytes that have been placed in a pump
  *                           function's output buffer.  This routine can only
  *                           be used by first calling pf_get_out_buf().
+ *
+ * Returns: SP_OK or a sump pump error code
  */
 int pfunc_put_out_buf_bytes(sp_task_t t, unsigned out_index, size_t size);
 
@@ -325,31 +397,46 @@ int pfunc_put_out_buf_bytes(sp_task_t t, unsigned out_index, size_t size);
  *                          sump pump threads, this function will return
  *                          0-3 depending on which of the 4 threads is
  *                          invoking it.
+ *
+ * Returns: The index of the requesting sump pump thread.
  */
 int pfunc_get_thread_index(sp_task_t t);
 
 
-/* pfunc_get_thread_number - can be used by pump functions to get the sump
- *                           pump task number being executed by the pump
- *                           function.  This number starts at 0 and
- *                           increases with each subsequent task
- *                           issued/started by the sump pump.
+/* pfunc_get_task_number - can be used by pump functions to get the sump
+ *                         pump task number being executed by the pump
+ *                         function.  This number starts at 0 and
+ *                         increases with each subsequent task
+ *                         issued/started by the sump pump.
+ *
+ * Returns: The task number (starting with 0 as the first task) that the
+ *          calling thread is currently executing.
  */
 uint64_t pfunc_get_task_number(sp_task_t t);
 
 
 /* pfunc_write - write function that can be used by a pump function to
  *               write the output data for the pump function.
+ *
+ * Returns: the number of bytes written.  If this is not the same as the
+ *          requested size, an error has occurred.
  */
 size_t pfunc_write(sp_task_t t, unsigned out_index, void *buf, size_t size);
 
 
 /* pfunc_printf - print a formatted string to a pump functions's output.
+ *
+ * Returns: the number of bytes written.  If this is not the same as the
+ *          requested size, an error has occurred.
  */
 int pfunc_printf(sp_task_t t, unsigned out_index, const char *fmt, ...);
 
 
-/* pfunc_error - raise an error for a pump function and define an error string.
+/* pfunc_error - raise an error for a pump function and define an error 
+ *               string that can be retrived by other threads using
+ *               sp_get_error_string().
+ *
+ * Returns: SP_PUMP_FUNCTION_ERROR
  */
 int pfunc_error(sp_task_t t, const char *fmt, ...);
 
@@ -363,10 +450,13 @@ void pfunc_mutex_lock(sp_task_t t);
  */
 void pfunc_mutex_unlock(sp_task_t t);
 
-/* END of pump func */
 
-
-/* SUMP Pump Error Codes */
+/* Sump Pump Library Error Codes
+ * -----------------------------
+ *
+ * Many sump pump API call return an integer indicates one the following
+ * success or error conditions:
+ */
 
 /* SP_OK - no error occurred, everything OK */
 #define SP_OK                   0
