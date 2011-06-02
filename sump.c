@@ -3458,6 +3458,12 @@ size_t pfunc_get_rec(sp_task_t t, void *ptr_to_rec_ptr)
     if (sp->flags & SP_GROUP_BY)
     {
         match_char = rec[0];
+        if (match_char != '0' && match_char != '1')
+        {
+            pfunc_error(t, "-group was specified, but an input record does not start with\n"
+                        "'0' or '1'. Was nsort -match used to generate input?\n");
+            /* return 0; don't return EOF as this can result in infinite loop*/
+        }
         rec++;
         new_key_group_beginning =
             (match_char == '0' && !t->first_group_rec);
@@ -3773,74 +3779,47 @@ static void *pump_thread_main(void *arg)
 
         TRACE("pump%d: calling pump func with %d input bytes\n",
               thread_index, (int)t->in_buf_bytes);
-#if 0
-        if (ExtraProcess)
+
+        if (REC_TYPE(sp) == SP_WHOLE_BUF)
         {
-            /* Notifiy sump pump process that it has a task to perform */
-            sem_post(...);
-
-            for (;;)
+            TRACE("pump%d: calling pump func() block\n", thread_index);
+            ret = (*sp->pump_func)(t, sp->pump_arg);
+            TRACE("pump%d: pump func returned %d\n", thread_index, ret);
+            if (ret)
             {
-                /* Wait for sump pump process to complete or stall */
-                sem_wait(...);
-
-                if (complete)
-                    break;
-
-                /* notify writer */
-                ;
-
-                /* wait for writer */
-                ;
-
-                /* notify sump pump process that it can proceed */
-                sem_post(...);
-            }
-        }
-        else
-#endif
-        {
-            if (REC_TYPE(sp) == SP_WHOLE_BUF)
-            {
-                TRACE("pump%d: calling pump func() block\n", thread_index);
-                ret = (*sp->pump_func)(t, sp->pump_arg);
-                TRACE("pump%d: pump func returned %d\n", thread_index, ret);
-                if (ret)
-                {
-                    if (t->error_code == 0)
-                        t->error_code = ret;
-                }
-                else
-                {
-                    done_reading_in_buf(t, TRUE);
-                    t->input_eof = TRUE;
-                }
+                if (t->error_code == 0)
+                    t->error_code = ret;
             }
             else
             {
-                while (is_more_input(t) && t->error_code == 0)
-                {
-                    TRACE("pump%d: calling pump func()\n", thread_index);
-                    /* indicate first record in key group not yet read */
-                    t->first_group_rec = TRUE;
-                    ret = (*sp->pump_func)(t, sp->pump_arg);
-                    TRACE("pump%d: pump func returned %d, input_eof: %d\n",
-                          thread_index, ret, t->input_eof);
-                    if (ret && t->error_code == 0)
-                        t->error_code = ret;
-                }
+                done_reading_in_buf(t, TRUE);
+                t->input_eof = TRUE;
             }
-            TRACE("pump%d: pump_func returns with %d out[0] bytes\n",
-                  thread_index, t->out[0].bytes_copied);
-            pthread_mutex_lock(&sp->sump_mtx);
-            if (t->error_code && sp->error_code == 0)
-            {
-                sp->error_code = t->error_code;
-                sp->error_buf = t->error_buf;
-                broadcast_all_conds(sp);
-            }
-            pthread_mutex_unlock(&sp->sump_mtx);
         }
+        else
+        {
+            while (is_more_input(t) && t->error_code == 0)
+            {
+                TRACE("pump%d: calling pump func()\n", thread_index);
+                /* indicate first record in key group not yet read */
+                t->first_group_rec = TRUE;
+                ret = (*sp->pump_func)(t, sp->pump_arg);
+                TRACE("pump%d: pump func returned %d, input_eof: %d\n",
+                      thread_index, ret, t->input_eof);
+                if (ret && t->error_code == 0)
+                    t->error_code = ret;
+            }
+        }
+        TRACE("pump%d: pump_func returns with %d out[0] bytes\n",
+              thread_index, t->out[0].bytes_copied);
+        pthread_mutex_lock(&sp->sump_mtx);
+        if (t->error_code && sp->error_code == 0)
+        {
+            sp->error_code = t->error_code;
+            sp->error_buf = t->error_buf;
+            broadcast_all_conds(sp);
+        }
+        pthread_mutex_unlock(&sp->sump_mtx);
 
         TRACE("pump%d: waking output reader\n", thread_index);
         TRACE("pump%d: waking input writer\n", thread_index);
