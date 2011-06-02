@@ -1,0 +1,139 @@
+# Make.win - makefile for compiling SUMP Pump with Visual Studio Tools.
+#
+# $Revision$
+# 
+# To use this makefile, open a Visual Studio command prompt and use the
+# following:
+#     nmake -f Make.win [target]
+# Yes, it would be preferable to do all this in a Visual Studio project.
+#
+# NOTA BENE: Due to the dependence on the 32-bit zlib library for the spgzip,
+#            gensort and valsort programs, the performance programs cannot
+#            currently be built for 64-bit systems.
+#
+# In order to test, you currently need to use a cygwin environment. In a
+# cygwin shell, to generate the test files use:
+#     make testfiles
+# Then test with the python script runregtests.py.  UNFORTUNATELY PYTHON
+# on Windows seems to periodically return bogus return values of 127 for
+# external programs (including "cmp"), so the regression and performance
+# tests don't run reliably.
+#
+CFLAGS=/nologo /Zi /MTd
+LIBS=   # was kernel32.lib
+
+EXPORTS= /export:sp_get_version \
+         /export:sp_get_id \
+         /export:sp_start \
+         /export:sp_argv_to_str \
+         /export:sp_start_sort \
+         /export:sp_get_sort_stats \
+         /export:sp_get_nsort_version \
+         /export:sp_link \
+         /export:sp_write_input \
+         /export:sp_get_in_buf \
+         /export:sp_put_in_buf_bytes \
+         /export:sp_read_output \
+         /export:sp_get_error \
+         /export:sp_wait \
+         /export:sp_open_file_src \
+         /export:sp_open_file_dst \
+         /export:sp_file_wait \
+         /export:sp_get_error_string \
+         /export:pfunc_get_rec \
+         /export:pfunc_get_in_buf \
+         /export:pfunc_get_out_buf \
+         /export:pfunc_put_out_buf_bytes \
+         /export:pfunc_get_thread_index \
+         /export:pfunc_get_task_number \
+         /export:pfunc_write \
+         /export:pfunc_printf \
+         /export:pfunc_error \
+         /export:pfunc_mutex_lock \
+         /export:pfunc_mutex_unlock 
+
+all: sump.exe reduce.exe reducefixed.exe upper.exe upperfixed.exe upperwhole.exe oneshot.exe sumpversion.exe billing.exe spgzip.exe lookup.exe gensort.exe valsort.exe
+
+sump.exe: sump.obj main.c
+	cl $(CFLAGS) sump.obj main.c $(LIBS)
+
+sump.obj: sump.c sump.h sump_win.c sump_win.h
+	cl -c $(CFLAGS) sump.c
+
+libsump.dll: sump.obj
+	link /nologo /dll $(EXPORTS) sump.obj /out:libsump.dll
+
+reduce.exe: reduce.obj libsump.dll
+	cl $(CFLAGS) reduce.obj libsump.lib $(LIBS)
+
+reduce.obj: reduce.c
+	cl $(CFLAGS) -c reduce.c
+
+reducefixed.exe: reducefixed.obj libsump.dll
+	cl $(CFLAGS) reducefixed.obj libsump.lib $(LIBS)
+
+reducefixed.obj: reducefixed.c
+	cl $(CFLAGS) -c reducefixed.c
+
+upper.exe: upper.obj libsump.dll
+	cl $(CFLAGS) upper.obj libsump.lib $(LIBS)
+
+upper.obj: upper.c
+	cl $(CFLAGS) -c upper.c
+
+upperfixed.exe: upperfixed.obj libsump.dll
+	cl $(CFLAGS) upperfixed.obj libsump.lib $(LIBS)
+
+upperfixed.obj: upperfixed.c
+	cl $(CFLAGS) -c upperfixed.c
+
+upperwhole.exe: upperwhole.obj libsump.dll
+	cl $(CFLAGS) upperwhole.obj libsump.lib $(LIBS)
+
+upperwhole.obj: upperwhole.c
+	cl $(CFLAGS) -c upperwhole.c
+
+oneshot.exe: oneshot.obj libsump.dll
+	cl $(CFLAGS) oneshot.obj libsump.lib $(LIBS)
+
+oneshot.obj: oneshot.c
+	cl $(CFLAGS) -c oneshot.c
+
+billing.exe: billing.obj libsump.dll
+	cl $(CFLAGS) billing.obj libsump.lib $(LIBS)
+
+billing.obj: billing.c
+	cl $(CFLAGS) -c billing.c
+
+spgzip.exe: spgzip.obj libsump.dll
+	cl $(CFLAGS) spgzip.obj libsump.lib zdll.lib $(LIBS)
+
+spgzip.obj: spgzip.c
+	cl $(CFLAGS) /Izlib\include -c spgzip.c
+
+lookup.exe: lookup.obj libsump.dll
+	cl $(CFLAGS) lookup.obj libsump.lib zdll.lib $(LIBS)
+
+lookup.obj: lookup.c
+	cl $(CFLAGS) /Izlib\include -c lookup.c
+
+gensort.exe: gensort.obj libsump.dll rand16.obj
+	cl $(CFLAGS) gensort.obj rand16.obj libsump.lib zdll.lib $(LIBS)
+
+gensort.obj: gensort.c
+	cl $(CFLAGS) /Izlib\include -c gensort.c
+
+valsort.exe: valsort.obj libsump.dll rand16.obj
+	cl $(CFLAGS) valsort.obj rand16.obj libsump.lib zdll.lib $(LIBS)
+
+valsort.obj: valsort.c
+	cl $(CFLAGS) /Izlib\include -c valsort.c
+
+sumpversion.exe: sumpversion.obj libsump.dll
+	cl $(CFLAGS) sumpversion.obj libsump.lib $(LIBS)
+
+sumpversion.obj: sumpversion.c
+	cl $(CFLAGS) -c sumpversion.c
+
+rand16.obj: rand16.c rand16.h
+	cl -c $(CFLAGS) rand16.c
