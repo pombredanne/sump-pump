@@ -66,37 +66,48 @@ for i in range(iteration_count):
     threads = randint(1,20)
     rec_size = ''
     reduce_input_file = ''
-    if randint(0, 1) == 0:
+    if randint(0, 3) != 0:
+        # perform a not-word-count test
         if randint(0, 1) == 0:
-            testprog = 'reduce'
+            if randint(0, 1) == 0:
+                testprog = 'reduce'
+            else:
+                testprog = 'reducefixed'
+            match_keys = str(randint(1, 3))
+            correctoutput = 'rout' + match_keys + '_correct.txt'
+            reduce_input_file = ' -IN_FILE=rin' + match_keys + '.txt'
         else:
-            testprog = 'reducefixed'
-        match_keys = str(randint(1, 3))
-        correctoutput = 'rout' + match_keys + '_correct.txt'
-        reduce_input_file = ' -IN_FILE=rin' + match_keys + '.txt'
+            testindex = randint(1,3)
+            if testindex == 1:
+                testprog = 'upper' 
+                correctoutput = 'upper_correct.txt'
+                if randint(0,1) == 0:
+                    testprog = testprog + ' onebyone'
+            elif testindex == 2:
+                testprog = 'upperfixed' 
+                correctoutput = 'upper_correct.txt'
+                rec_size = ' -REC_SIZE=' + str(randint(2,12))
+                if randint(0,1) == 0:
+                    testprog = testprog + ' onebyone'
+            elif testindex == 3:
+                testprog = 'upperwhole' 
+                correctoutput = 'upper_correct.txt'
+        cmd = './' + testprog + rec_size + reduce_input_file + \
+              ' -OUT_BUF_SIZE[0]=' + str(outsize) + \
+              ' -IN_BUF_SIZE=' + str(insize) + \
+              ' -RW_TEST_SIZE=' + str(rwsize) + \
+              ' -IN_BUFS=' + str(inbufs) + \
+              ' -TASKS=' + str(tasks) + \
+              ' -THREADS=' + str(threads) 
     else:
-        testindex = randint(1,3)
-        if testindex == 1:
-            testprog = 'upper' 
-            correctoutput = 'upper_correct.txt'
-            if randint(0,1) == 0:
-                testprog = testprog + ' onebyone'
-        elif testindex == 2:
-            testprog = 'upperfixed' 
-            correctoutput = 'upper_correct.txt'
-            rec_size = ' -REC_SIZE=' + str(randint(2,12))
-            if randint(0,1) == 0:
-                testprog = testprog + ' onebyone'
-        elif testindex == 3:
-            testprog = 'upperwhole' 
-            correctoutput = 'upper_correct.txt'
-    cmd = './' + testprog + rec_size + reduce_input_file + \
-          ' -OUT_BUF_SIZE[0]=' + str(outsize) + \
-          ' -IN_BUF_SIZE=' + str(insize) + \
-          ' -RW_TEST_SIZE=' + str(rwsize) + \
-          ' -IN_BUFS=' + str(inbufs) + \
-          ' -TASKS=' + str(tasks) + \
-          ' -THREADS=' + str(threads) 
+        cmd = './sump -in_buf_size=' + str(randint(100,10000)) + \
+              ' python mapper.py < hounds.txt | ' \
+              'nsort -format:sep=tab -field=word,count,decimal,max=' + \
+              str(randint(1,4)) + \
+              ' -key:word -sum:count -nowarn -match | ' \
+              './sump -in_buf_size=' + str(randint(100,1000)) +\
+              ' -group python reducer.py > rout.txt'
+        correctoutput = 'correct_hounds_wc.txt'
     print i, ' ', cmd
     ret = os.system(cmd)
     if ret != 0:
