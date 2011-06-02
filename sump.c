@@ -1681,6 +1681,9 @@ static void *file_writer_buffered(void *arg)
 #if defined(win_nt)
     HANDLE              h = sp_dst->h;
     DWORD               wr_size;
+    int64_t             file_size = 0;
+    LONG                high;
+    LONG                low;
 #else
     int                 fd = sp_dst->fd;
 #endif      
@@ -1703,6 +1706,7 @@ static void *file_writer_buffered(void *arg)
         }
         TRACE("file_writer: writing %d bytes\n", size);  
 #if defined(win_nt)
+        file_size += size;
         if (!WriteFile(h, buf, size, &wr_size, NULL))
 #else
         if (write(fd, buf, (unsigned int)size) != size)
@@ -1713,9 +1717,38 @@ static void *file_writer_buffered(void *arg)
                            sp_dst->fname,
                            get_error_msg(0, err_buf, sizeof(err_buf)));
             sp_dst->error_code = SP_FILE_WRITE_ERROR;
+            TRACE("output file write error: %s\n", err_buf);
             break;
         }
     }
+#if defined(win_nt)
+    if (GetFileType(h) == FILE_TYPE_DISK)
+    {
+        high = file_size >> 32;
+        low = file_size & 0xFFFFFFFF;
+        if (SetFilePointer(h, low, &high, FILE_BEGIN) == 0xFFFFFFFF)
+        {
+            if (GetLastError() != NO_ERROR)
+            {
+                sp_raise_error(sp, SP_FILE_WRITE_ERROR,
+                               "%s: SetFilePointer() failure: %s\n",
+                               sp_dst->fname,
+                               get_error_msg(0, err_buf, sizeof(err_buf)));
+                sp_dst->error_code = SP_FILE_WRITE_ERROR;
+                TRACE("SetFilePointer() error: %s\n", err_buf);
+            }
+        }
+        if (!SetEndOfFile(h))
+        {
+            sp_raise_error(sp, SP_FILE_WRITE_ERROR,
+                           "%s: SetEndOfFile() failure: %s\n",
+                           sp_dst->fname,
+                           get_error_msg(0, err_buf, sizeof(err_buf)));
+            sp_dst->error_code = SP_FILE_WRITE_ERROR;
+            TRACE("SetEndOfFile() error: %s\n", err_buf);
+        }
+    }
+#endif
     TRACE("file_writer_buffered done: %d\n", sp_dst->error_code);
     return (NULL);
 }
@@ -4781,9 +4814,16 @@ int sp_start(sp_t *caller_sp,
         if (sp->flags & SP_EXEC)
         {
             sp->ex_state[i].in.ex = &sp->ex_state[i];
-            sp->ex_state[i].in.rd_fd = sp->ex_state[i].in.wr_fd = INVALID_FD;
             sp->ex_state[i].out.ex = &sp->ex_state[i];
+#if defined(win_nt)
+            sp->ex_state[i].in.rd_h = sp->ex_state[i].in.wr_h =
+                INVALID_HANDLE_VALUE;
+            sp->ex_state[i].out.rd_h = sp->ex_state[i].out.wr_h = 
+                INVALID_HANDLE_VALUE;
+#else
+            sp->ex_state[i].in.rd_fd = sp->ex_state[i].in.wr_fd = INVALID_FD;
             sp->ex_state[i].out.rd_fd = sp->ex_state[i].out.wr_fd = INVALID_FD;
+#endif
 #if defined(SUMP_PIPE_STDERR)
             sp->ex_state[i].err.ex = &sp->ex_state[i];
             sp->ex_state[i].err.rd_fd = sp->ex_state[i].err.wr_fd = INVALID_FD;
