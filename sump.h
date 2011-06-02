@@ -263,11 +263,6 @@ ssize_t sp_read_output(sp_t sp, unsigned index, void *buf, ssize_t size);
 int sp_get_error(sp_t sp);
 
 
-/* sp_upstream_error - raise an upstream error for a sump pump
- */
-void sp_upstream_error(sp_t sp, const char *fmt, ...);
-
-
 /* sp_wait - can be called by an external thread, e.g. the thread that
  *           called sp_start(), to wait for all sump pump activity to cease.
  */
