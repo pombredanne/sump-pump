@@ -107,11 +107,17 @@ typedef int (*sp_pump_t)(sp_task_t t, void *arg);
  */
 
 /* sp_get_version - get the subversion version for sump pump
+ *
+ * Returns: a string containing the subversion version. The string should
+ *          NOT be free()'d.
  */
 const char *sp_get_version(void);
 
 
 /* sp_get_id - get the subversion id keyword substitution for sump pump
+ *
+ * Returns: a string containing the subversion id keyword. The string should
+ *          NOT be free()'d.
  */
 const char *sp_get_id(void);
 
@@ -213,8 +219,11 @@ int sp_start(sp_t *sp, sp_pump_t pump_func, char *arg_fmt, ...);
  *                  for instance if argc is 2, argv[0] is "TASKS=2" and
  *                  argv[1] is "THEADS=3", then return the string
  *                  "TASKS=2 THREADS=3".
+ *
+ * Returns: a string containing the command line arguments passed as function
+ *          arguments. The string should be free()'d when no longer needed.
  */
-const char *sp_argv_to_str(char *argv[], int argc);
+char *sp_argv_to_str(char *argv[], int argc);
 
 
 /* sp_start_sort - start an nsort instance with a sump pump outside
@@ -246,11 +255,17 @@ int sp_start_sort(sp_t *sp,
 
 /* sp_get_sort_stats - get a string containing the nsort statistics report
  *                     for an nsort sump pump that has completed.
+ *
+ * Returns: a string containing the Nsort statistics report. The string should
+ *          NOT be free()'d and is valid until the passed sp_t is sp_free()'d.
  */
 const char *sp_get_sort_stats(sp_t sp);
 
 
 /* sp_get_nsort_version - get the subversion version for sump pump
+ *
+ * Returns: a string containing the Nsort version number. The string should
+ *          NOT be free()'d.
  */
 const char *sp_get_nsort_version(void);
 
@@ -340,8 +355,21 @@ int sp_file_wait(sp_file_t sp_file);
 
 
 /* sp_get_error_string - return an error message string
+ *
+ * Returns: a string containing a sump pump error message. The string should
+ *          NOT be free()'d and is valid until the passed sp_t is sp_free()'d.
  */
 const char *sp_get_error_string(sp_t sp, int error_code);
+
+
+/* sp_free - free the specified sp_t and its associated state.
+ */
+void sp_free(sp_t *caller_sp);
+
+
+/* sp_file_free - free the specified sp_file_t and its associated state.
+ */
+void sp_file_free(sp_file_t *caller_sp_file);
 
 
 /* Library Functions for Pump Functions
