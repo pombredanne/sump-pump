@@ -11,13 +11,14 @@ libnsort.so.1 {
 		sp_get_write_buf;
 		sp_read_output;
 		sp_get_error;
-		sp_upstream_error;
 		sp_wait;
 		sp_open_file_src;
 		sp_open_file_dst;
 		sp_file_wait;
 		sp_get_error_string;
 		sp_get_nsort_version;
+		sp_free;
+		sp_file_free;
 		pfunc_get_rec;
 		pfunc_get_in_buf;
 		pfunc_get_out_buf;
