@@ -75,6 +75,9 @@ int main(int argc, char *argv[])
         fprintf(stderr, "sp_wait: %s\n", sp_get_error_string(sp, ret));
         return (1);
     }
+    /* Free sump pump resources. Not necessary for an exiting program but
+     * called here for testing purposes */
+    sp_free(&sp);
     return (0);
 }
 

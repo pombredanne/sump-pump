@@ -87,6 +87,7 @@ int main(int argc, char *argv[])
             break;  /* success! */
         }
     }
+    sp_free(&sp);
                    
     /* have pump function raise an error that causes a sp_read_output() call
      * to fail.
@@ -165,11 +166,8 @@ int main(int argc, char *argv[])
                     "include \"DELIM_MISSING\":\n%s\n", error_str);
             return (1);
         }
-        
-        /* force licensing failure for hitting free licensing capacity limit.
-         * XXX
-         */
     }
+    sp_free(&sp);
 
     return (0);
 }
