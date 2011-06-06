@@ -209,7 +209,9 @@ struct sump
     char                sort_state;     /* only used for sorting */
     char                match_keys;     /* only used for sorting - indicates
                                          * -match has been specified */
-    const char          *in_file;       /* input file str or NULL if none */
+    char                in_file_alloc;  /* in_file string was malloc()'d and
+                                         * should be free()'d */
+    char                *in_file;       /* input file str or NULL if none */
     struct sp_file      *in_file_sp;    /* input file of sump pump */
     struct exec_state   *ex_state;      /* used when internal pump func invokes
                                          * an external executable program.
@@ -328,6 +330,7 @@ typedef struct in_buf
                                  * by the reader thread.  these bytes
                                  * will be read out by map task */
     size_t      in_buf_size;    /* size of the in_buf */
+    size_t      alloc_size;     /* allocation size of the in_buf */
     unsigned    num_readers;    /* number of threads performing
                                  * tasks that read this buf */
     unsigned    num_readers_done;/* number of reader threads that are
@@ -384,7 +387,9 @@ struct sump_out
     size_t              partial_bytes_copied; /* the number of bytes copied
                                                * from the task output buffer
                                                * currently being read from */
-    const char          *file;         /* output file str or NULL if none */
+    char                file_alloc;     /* file name was malloc()'d and
+                                         * should be free()'d */
+    char                *file;         /* output file str or NULL if none */
     struct sp_file      *file_sp;      /* output file for this sump pump out */
     uint64_t            cnt_task_drained; /* number of tasks that have
                                            * been completed and their
@@ -443,6 +448,9 @@ static void trace(const char *fmt, ...)
 
 
 /* sp_get_version - get the subversion version for sump pump
+ *
+ * Returns: a string containing the subversion version. The string should
+ *          NOT be free()'d.
  */
 const char *sp_get_version(void)
 {
@@ -451,6 +459,9 @@ const char *sp_get_version(void)
 
 
 /* sp_get_id - get the subversion id keyword substitution for sump pump
+ *
+ * Returns: a string containing the subversion id keyword. The string should
+ *          NOT be free()'d.
  */
 const char *sp_get_id(void)
 {
@@ -904,6 +915,9 @@ int sp_start_sort(sp_t *caller_sp,
 
 /* sp_get_sort_stats - get a string containing the nsort statistics report
  *                     for an nsort sump pump that has completed.
+ *
+ * Returns: a string containing the Nsort statistics report. The string should
+ *          NOT be free()'d and is valid until the passed sp_t is sp_free()'d.
  */
 const char *sp_get_sort_stats(sp_t sp)
 {
@@ -921,6 +935,9 @@ const char *sp_get_sort_stats(sp_t sp)
 
 
 /* sp_get_nsort_version - get the subversion version for sump pump
+ *
+ * Returns: a string containing the Nsort version number. The string should
+ *          NOT be free()'d.
  */
 const char *sp_get_nsort_version(void)
 {
@@ -1468,7 +1485,7 @@ int pfunc_exec(sp_task_t t, void *unused)
         if (exitCode != 0)
         {
             pfunc_error(t,
-                        "process '%s' instance %llu exited with status: %d\n",
+                        "process '%s' instance %I64u exited with status: 0x%x\n",
                         sp->exec_argv[0], t->task_number, exitCode);
         }
         CloseHandle(pi.hProcess);
@@ -1561,9 +1578,15 @@ static void *file_reader_test(void *arg)
     TRACE("file_reader_intr: allocating %d buffer bytes\n",
           sp_src->transfer_size);
     read_buf = (char *)malloc(sp_src->transfer_size);
+    if (read_buf == NULL)
+    {
+        sp_raise_error(sp, SP_MEM_ALLOC_ERROR,
+                       "%s: buffer malloc failure, size %d\n",
+                       sp_src->fname, (int)sp_src->transfer_size);
+    }
     
     /* keep looping until there is no additional input */
-    for (;;)
+    for ( ; read_buf != NULL; )
     {
 #if defined(win_nt)
         DWORD   rlen;
@@ -1590,6 +1613,8 @@ static void *file_reader_test(void *arg)
         if (size == 0)  /* if we just sent 0 bytes to sp_write_input() */
             break;
     }
+    if (read_buf != NULL)
+        free(read_buf);
     TRACE("file_reader_test done: %d\n", sp_src->error_code);
     return (NULL);
 }
@@ -1694,8 +1719,14 @@ static void *file_writer_buffered(void *arg)
     
     TRACE("file_writer_buffered: allocating %d buffer bytes\n", sp_dst->transfer_size);
     buf = (char *)malloc(sp_dst->transfer_size);
-    
-    for (;;)
+    if (buf == NULL)
+    {
+        sp_raise_error(sp, SP_MEM_ALLOC_ERROR,
+                       "%s: buffer malloc failure, size %d\n",
+                       sp_dst->fname, (int)sp_dst->transfer_size);
+    }
+        
+    for ( ; buf != NULL; )
     {
         size = sp_read_output(sp, out_index, buf, sp_dst->transfer_size);
         if (size <= 0)
@@ -1724,7 +1755,7 @@ static void *file_writer_buffered(void *arg)
         }
     }
 #if defined(win_nt)
-    if (GetFileType(h) == FILE_TYPE_DISK)
+    if (buf != NULL && GetFileType(h) == FILE_TYPE_DISK)
     {
         high = file_size >> 32;
         low = file_size & 0xFFFFFFFF;
@@ -1751,6 +1782,8 @@ static void *file_writer_buffered(void *arg)
         }
     }
 #endif
+    if (buf != NULL)
+        free(buf);
     TRACE("file_writer_buffered done: %d\n", sp_dst->error_code);
     return (NULL);
 }
@@ -1788,6 +1821,14 @@ static void *file_reader_direct(void *arg)
     else
         aio_count = sp_src->aio_count;
     spaio = (struct sump_aio *)calloc(sizeof(struct sump_aio), aio_count);
+    if (spaio == NULL)
+    {
+        sp_raise_error(sp, SP_MEM_ALLOC_ERROR,
+                       "%s: aio malloc failure, size %d\n",
+                       sp_src->fname, (int)aio_count);
+        TRACE("file_reader_direct done: %d\n", sp_src->error_code);
+        return (NULL);
+    }
 
     /* keep looping until there is no additional input */
     next_in_buf = 0;
@@ -1899,6 +1940,7 @@ static void *file_reader_direct(void *arg)
             break;
         }
     }
+    free(spaio);
     TRACE("file_reader_direct done: %d\n", sp_src->error_code);
     return (NULL);
 }
@@ -1911,6 +1953,7 @@ static void *file_writer_direct(void *arg)
 {
     char                *buf;
     ssize_t             size;
+    ssize_t             alloc_size;
     sp_file_t           sp_dst = (sp_file_t)arg;
     sp_t                sp = sp_dst->sp;
     int                 out_index = sp_dst->out_index;
@@ -1935,11 +1978,19 @@ static void *file_writer_direct(void *arg)
     else
         aio_count = sp_dst->aio_count;
     spaio = (struct sump_aio *)calloc(sizeof(struct sump_aio), aio_count);
+    if (spaio == NULL)
+    {
+        sp_raise_error(sp, SP_MEM_ALLOC_ERROR,
+                       "%s: aio malloc failure, size %d\n",
+                       sp_src->fname, (int)aio_count);
+        TRACE("file_writer_direct done: %d\n", sp_src->error_code);
+        return (NULL);
+    }
 
     TRACE("file_writer_direct: allocating %d buffer bytes\n", sp_dst->transfer_size);
-    size = sp_dst->transfer_size * aio_count;
+    alloc_size = sp_dst->transfer_size * aio_count;
 #if defined(win_nt)
-    buf = VirtualAlloc(NULL, size, MEM_COMMIT, PAGE_READWRITE);
+    buf = VirtualAlloc(NULL, alloc_size, MEM_COMMIT, PAGE_READWRITE);
     if (buf == NULL)
     {
         sp_raise_error(sp, SP_MEM_ALLOC_ERROR,
@@ -1950,7 +2001,7 @@ static void *file_writer_direct(void *arg)
     }
 #else
     init_zero_fd();
-    buf = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE, Zero_fd, 0);
+    buf = mmap(NULL, alloc_size, PROT_READ | PROT_WRITE, MAP_PRIVATE, Zero_fd, 0);
     if (buf == MAP_FAILED)
     {
         sp_raise_error(sp, SP_MEM_ALLOC_ERROR,
@@ -2103,6 +2154,12 @@ static void *file_writer_direct(void *arg)
             }
         }
     }
+#if defined(win_nt)
+    VirtualFree(buf, alloc_size, MEM_RELEASE);
+#else
+    munmap(buf, alloc_size);
+#endif
+    free(spaio);
     TRACE("file_writer_direct done: %d\n", sp_dst->error_code);
     return NULL;
 }
@@ -4196,7 +4253,7 @@ static int get_logical_processor_count()
 
 /* get_string_arg - internal routine to scan and return a string
  */
-static const char *get_string_arg(char **caller_p)
+static char *get_string_arg(char **caller_p)
 {
     char        *begin_p = *caller_p;
     char        *p;
@@ -4222,8 +4279,11 @@ static const char *get_string_arg(char **caller_p)
  *                  For instance if argc is 2, argv[0] is "TASKS=2" and
  *                  argv[1] is "THEADS=3", then return the string
  *                  "TASKS=2 THREADS=3".
+ *
+ * Returns: a string containing the command line arguments passed as function
+ *          arguments. The string should be free()'d when no longer needed.
  */
-const char *sp_argv_to_str(char *argv[], int argc)
+char *sp_argv_to_str(char *argv[], int argc)
 {
     int                 i;
     char                *str = NULL;
@@ -4578,6 +4638,7 @@ int sp_start(sp_t *caller_sp,
             {
                 /* get input file here */
                 sp->in_file = get_string_arg(&p);
+                sp->in_file_alloc = TRUE;
             }
             else if (scan("OUT_BUF_SIZE", &p))
             {
@@ -4643,6 +4704,7 @@ int sp_start(sp_t *caller_sp,
                     return (sp->error_code);
                 }
                 sp->out[index].file = get_string_arg(&p);
+                sp->out[index].file_alloc = TRUE;
             }
             else if (scan("OUTPUTS=", &p))
             {
@@ -4799,6 +4861,7 @@ int sp_start(sp_t *caller_sp,
             return (SP_MEM_ALLOC_ERROR);
 #endif
         sp->in_buf[i].in_buf_size = sp->in_buf_size;
+        sp->in_buf[i].alloc_size = buf_size;
     }
 
     if (sp->flags & SP_EXEC)
@@ -4893,6 +4956,9 @@ int sp_start(sp_t *caller_sp,
 
 
 /* sp_get_error_string - return an error message string
+ *
+ * Returns: a string containing a sump pump error message. The string should
+ *          NOT be free()'d and is valid until the passed sp_t is sp_free()'d.
  */
 const char *sp_get_error_string(sp_t sp, int error_code)
 {
@@ -4984,6 +5050,146 @@ const char *sp_get_error_string(sp_t sp, int error_code)
         err_code_str = "Unknown Error";
     }
     return (err_code_str);
+}
+
+
+/* sp_free - free the specified sp_t and its associated state.
+ */
+void sp_free(sp_t *caller_sp)
+{
+    sp_t        sp;
+    int         i, j;
+
+    sp = *caller_sp;
+    if (sp == NULL)
+        return;
+
+    sp_wait(sp); /* make sure sump pump has finished */
+    
+    if (sp->flags & SP_SORT)
+    {
+        if (sp->sort_temp_buf != NULL)
+            free(sp->sort_temp_buf);
+        sp->sort_temp_buf = NULL;
+
+        if (sp->nsort_ctx != 0)
+            (*Nsort_end)(&sp->nsort_ctx);
+    
+        if (sp->out != NULL)
+            free(sp->out);
+        sp->out = NULL;
+    }
+    else
+    {
+        if (sp->task != NULL)
+        {
+            for (i = 0; i < sp->num_tasks; i++)
+            {
+                if (sp->task[i].out != NULL)
+                    free(sp->task[i].out);
+                sp->task[i].out = NULL;
+
+                if (sp->task[i].error_buf != NULL)
+                    free(sp->task[i].error_buf);
+                sp->task[i].error_buf = NULL;
+                
+                for (j = 0; j < sp->num_outputs; j++)
+                {
+                    if (sp->task[i].out[j].buf != NULL)
+                        free(sp->task[i].out[j].buf);
+                    sp->task[i].out[j].buf = NULL;
+                }
+            }
+            free(sp->task);
+            sp->task = NULL;
+        }
+        if (sp->in_buf != NULL)
+        {
+            for (i = 0; i < sp->num_in_bufs; i++)
+            {
+                if (sp->in_buf[i].in_buf != NULL)
+                {
+#if defined(win_nt)
+                    VirtualFree(sp->in_buf[i].in_buf,
+                                sp->in_buf[i].alloc_size, MEM_RELEASE);
+#else
+                    munmap(sp->in_buf[i].in_buf, sp->in_buf[i].alloc_size);
+#endif
+                    sp->in_buf[i].in_buf = NULL;
+                }
+            }
+            free(sp->in_buf);
+            sp->in_buf = NULL;
+        }
+        if (sp->ex_state != NULL)
+        {
+            free(sp->ex_state);
+            sp->ex_state = NULL;
+        }
+
+        if (sp->thread != NULL)
+        {
+            pthread_mutex_destroy(&sp->sump_mtx);
+            pthread_mutex_destroy(&sp->sp_mtx);
+            pthread_cond_destroy(&sp->in_buf_readable_cond);
+            pthread_cond_destroy(&sp->in_buf_done_cond);
+            pthread_cond_destroy(&sp->task_avail_cond);
+            pthread_cond_destroy(&sp->task_drained_cond);
+            pthread_cond_destroy(&sp->task_output_ready_cond);
+            pthread_cond_destroy(&sp->task_output_empty_cond);
+            for (i = 0; i < sp->num_threads; i++)
+                pthread_detach(sp->thread[i]);
+            free(sp->thread);
+            sp->thread = NULL;
+        }
+    
+        if (sp->out != NULL)
+        {
+            for (i = 0; i < sp->num_outputs; i++)
+            {
+                if (sp->out[i].file_sp != NULL)
+                    sp_file_free(&sp->out[i].file_sp);
+                if (sp->out[i].file_alloc && sp->out[i].file != NULL)
+                    free(sp->out[i].file);
+            }
+            free(sp->out);
+            sp->out = NULL;
+        }
+
+        if (sp->in_file_sp != NULL)
+            sp_file_free(&sp->in_file_sp);
+        if (sp->in_file_alloc && sp->in_file != NULL)
+            free(sp->in_file);
+    }
+    if (sp->error_buf != NULL)
+        free(sp->error_buf);
+    sp->error_buf = NULL;
+
+    free(sp);
+    *caller_sp = NULL;
+}
+
+
+/* sp_file_free - free the specified sp_file_t and its associated state.
+ */
+void sp_file_free(sp_file_t *caller_sp_file)
+{
+    sp_file_t sp_file;
+
+    sp_file = *caller_sp_file;
+    if (sp_file == NULL)
+        return;
+
+    if (sp_file->fname != NULL)
+    {
+        free(sp_file->fname);
+        sp_file->fname = NULL;
+    }
+
+    
+    free(sp_file);
+    
+    *caller_sp_file = NULL;
 }
 
 
