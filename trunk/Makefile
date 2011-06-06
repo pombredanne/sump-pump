@@ -48,9 +48,19 @@ sump: sump.o main.c sump.h sumpversion.h
 sumpversion.h: sump.c sump.h
 	(echo -n 'static char *sp_version = "'; echo -n $(RELEASE); echo -n ', svn: '; svnversion -n; echo '";') > sumpversion.h
 
-reg: $(REG_TESTS) $(REG_FILES) 
+reg: regtestprogs regtestfiles
 
-perf: $(PERF_TESTS) $(PERF_FILES)
+regtestprogs: $(REG_TESTS)
+
+regtestfiles: $(REG_FILES)
+
+perf: perftestprogs perftestfiles
+
+perftestprogs: $(PERF_TESTS)
+
+perftestfiles: $(PERF_FILES)
+
+testfiles: regtestfiles perftestfiles
 
 # Install rule to place the sump pump library in the library directory, 
 # and the sump.h file in the include directory.
