@@ -74,21 +74,24 @@ int getpagesize()
  */
 int pthread_join(pthread_t th, void **value_ptr)
 {
-    long        dummy;
-    long        *ret_value;
     int         ret;
-    
-    if ((ret = WaitForSingleObject(th.h, INFINITE)) != WAIT_OBJECT_0) /* wait for thread to exit */
-        TRACE("wait for thread 0x%x failed: %d\n", th, ret);
 
-    if (value_ptr == NULL)
-        ret_value = &dummy;
+    if (th.handle_closed == FALSE)
+    {
+        /* wait for thread to exit */
+        if ((ret = WaitForSingleObject(th.h, INFINITE)) != WAIT_OBJECT_0) 
+            TRACE("wait for thread 0x%x failed: %d\n", th, ret);
+        ret = GetExitCodeThread(th.h, &th.exit_code);
+        TRACE("pthread_join: tread exited\n");
+        if (ret && th.exit_code == STILL_ACTIVE)
+            TRACE("pthread_join: thread %d has not exited yet", th);
+        CloseHandle(th.h);
+        th.handle_closed = TRUE;
+    }
     else
-        ret_value = (long *)value_ptr;
-    ret = GetExitCodeThread(th.h, ret_value);
-    TRACE("pthread_join: tread exited\n");
-    if (ret && *ret_value == STILL_ACTIVE)
-        TRACE("pthread_join: thread %d has not exited yet", th);
+        ret = 1;
+    if (value_ptr != NULL)
+        *value_ptr = (void *)th.exit_code;
     return (ret ? 0 : ESRCH);
 }
 
@@ -273,7 +276,13 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, struct 
     return (cond_wait(cond, mutex, 1));
 }
 
+/* pthread_exit - SUMP Pump on NT implementation of POSIX thread routine.
+ */
 void pthread_exit(void *status)
 {
     _endthreadex((UINT)(size_t)status);
 }
+
+/* pthread_detatch - SUMP Pump on NT implementation of POSIX thread routine.
+ */
+int pthread_detach(pthread_t th) { return (0); }

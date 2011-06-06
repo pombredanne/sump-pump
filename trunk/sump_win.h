@@ -60,6 +60,8 @@ typedef struct
 {
     DWORD       id;
     HANDLE      h;
+    long        exit_code;
+    int         handle_closed;
 }
 pthread_t;
 
@@ -85,6 +87,7 @@ typedef int pid_t;
 /* pthread_create() is not defined, use _beginthreadex() directly */
 int pthread_join(pthread_t, void **);
 void pthread_exit(void *status);
+int pthread_detach(pthread_t);
 # define pthread_self()		GetCurrentThreadId()
 # define pthread_equal(pt1, pt2)	((pt1) == (pt2))
 
