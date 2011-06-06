@@ -209,6 +209,7 @@ struct sump
     char                sort_state;     /* only used for sorting */
     char                match_keys;     /* only used for sorting - indicates
                                          * -match has been specified */
+    char                wait_done;      /* sp_wait already called for this sp*/
     char                in_file_alloc;  /* in_file string was malloc()'d and
                                          * should be free()'d */
     char                *in_file;       /* input file str or NULL if none */
@@ -364,6 +365,7 @@ struct sp_file
 #else
     int         fd;             /* file descriptor */
 #endif
+    char        wait_done;      /* sp_wait already called for this sp_file */
     int         out_index;      /* sump pump output index (if relevant) */
     int         aio_count;      /* the max and target number of async i/o's */
     size_t      transfer_size;  /* read or write request size */
@@ -1982,8 +1984,8 @@ static void *file_writer_direct(void *arg)
     {
         sp_raise_error(sp, SP_MEM_ALLOC_ERROR,
                        "%s: aio malloc failure, size %d\n",
-                       sp_src->fname, (int)aio_count);
-        TRACE("file_writer_direct done: %d\n", sp_src->error_code);
+                       sp_dst->fname, (int)aio_count);
+        TRACE("file_writer_direct done: %d\n", sp_dst->error_code);
         return (NULL);
     }
 
@@ -2177,6 +2179,9 @@ int sp_wait(sp_t sp)
     unsigned    i;
     int         ret;
 
+    /* if already waited for this sump pump to complete */
+    if (sp->wait_done == TRUE)
+        return (sp->error_code);
     if (sp->flags & SP_SORT)
     {
 #if !defined(SUMP_PUMP_NO_SORT)
@@ -2225,6 +2230,7 @@ int sp_wait(sp_t sp)
             }
         }
     }
+    sp->wait_done = TRUE;
     return (sp->error_code);
 }
 
@@ -2589,7 +2595,10 @@ sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods)
  */
 int sp_file_wait(sp_file_t sp_file)
 {
+    if (sp_file->wait_done == TRUE)
+        return (sp_file->error_code);
     pthread_join(sp_file->thread, NULL);
+    sp_file->wait_done = TRUE;
     return (sp_file->error_code);
 }
 
@@ -3873,7 +3882,10 @@ static void *pump_thread_main(void *arg)
         if (t->error_code && sp->error_code == 0)
         {
             sp->error_code = t->error_code;
+            if (sp->error_buf != NULL)
+                free(sp->error_buf);
             sp->error_buf = t->error_buf;
+            t->error_buf = NULL;
             broadcast_all_conds(sp);
         }
         pthread_mutex_unlock(&sp->sump_mtx);
@@ -5070,14 +5082,12 @@ void sp_free(sp_t *caller_sp)
     {
         if (sp->sort_temp_buf != NULL)
             free(sp->sort_temp_buf);
-        sp->sort_temp_buf = NULL;
 
         if (sp->nsort_ctx != 0)
             (*Nsort_end)(&sp->nsort_ctx);
     
         if (sp->out != NULL)
             free(sp->out);
-        sp->out = NULL;
     }
     else
     {
@@ -5086,22 +5096,17 @@ void sp_free(sp_t *caller_sp)
             for (i = 0; i < sp->num_tasks; i++)
             {
                 if (sp->task[i].out != NULL)
+                {
+                    for (j = 0; j < sp->num_outputs; j++)
+                        if (sp->task[i].out[j].buf != NULL)
+                            free(sp->task[i].out[j].buf);
                     free(sp->task[i].out);
-                sp->task[i].out = NULL;
+                }
 
                 if (sp->task[i].error_buf != NULL)
                     free(sp->task[i].error_buf);
-                sp->task[i].error_buf = NULL;
-                
-                for (j = 0; j < sp->num_outputs; j++)
-                {
-                    if (sp->task[i].out[j].buf != NULL)
-                        free(sp->task[i].out[j].buf);
-                    sp->task[i].out[j].buf = NULL;
-                }
             }
             free(sp->task);
-            sp->task = NULL;
         }
         if (sp->in_buf != NULL)
         {
@@ -5115,17 +5120,12 @@ void sp_free(sp_t *caller_sp)
 #else
                     munmap(sp->in_buf[i].in_buf, sp->in_buf[i].alloc_size);
 #endif
-                    sp->in_buf[i].in_buf = NULL;
                 }
             }
             free(sp->in_buf);
-            sp->in_buf = NULL;
         }
         if (sp->ex_state != NULL)
-        {
             free(sp->ex_state);
-            sp->ex_state = NULL;
-        }
 
         if (sp->thread != NULL)
         {
@@ -5137,10 +5137,7 @@ void sp_free(sp_t *caller_sp)
             pthread_cond_destroy(&sp->task_drained_cond);
             pthread_cond_destroy(&sp->task_output_ready_cond);
             pthread_cond_destroy(&sp->task_output_empty_cond);
-            for (i = 0; i < sp->num_threads; i++)
-                pthread_detach(sp->thread[i]);
             free(sp->thread);
-            sp->thread = NULL;
         }
     
         if (sp->out != NULL)
@@ -5153,7 +5150,6 @@ void sp_free(sp_t *caller_sp)
                     free(sp->out[i].file);
             }
             free(sp->out);
-            sp->out = NULL;
         }
 
         if (sp->in_file_sp != NULL)
@@ -5163,7 +5159,6 @@ void sp_free(sp_t *caller_sp)
     }
     if (sp->error_buf != NULL)
         free(sp->error_buf);
-    sp->error_buf = NULL;
 
     free(sp);
     *caller_sp = NULL;
@@ -5181,11 +5176,7 @@ void sp_file_free(sp_file_t *caller_sp_file)
         return;
 
     if (sp_file->fname != NULL)
-    {
         free(sp_file->fname);
-        sp_file->fname = NULL;
-    }
-
     
     free(sp_file);
     
