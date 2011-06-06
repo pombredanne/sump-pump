@@ -40,6 +40,8 @@ EXPORTS= /export:sp_get_version \
          /export:sp_open_file_dst \
          /export:sp_file_wait \
          /export:sp_get_error_string \
+         /export:sp_free \
+         /export:sp_file_free \
          /export:pfunc_get_rec \
          /export:pfunc_get_in_buf \
          /export:pfunc_get_out_buf \
