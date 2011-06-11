@@ -2,8 +2,8 @@
 #
 # $Revision$
 # 
-# To use this makefile, open a Visual Studio command prompt and use the
-# following:
+# To use this makefile, open a Visual Studio command prompt with the desiged
+# environment (x86 or x64) and use the following:
 #     nmake -f Make.win [target]
 # Yes, it would be preferable to do all this in a Visual Studio project.
 #
@@ -54,88 +54,58 @@ EXPORTS= /export:sp_get_version \
          /export:pfunc_mutex_lock \
          /export:pfunc_mutex_unlock 
 
-all: sump.exe reduce.exe reducefixed.exe upper.exe upperfixed.exe upperwhole.exe oneshot.exe sumpversion.exe billing.exe spgzip.exe lookup.exe gensort.exe valsort.exe
+all: sump.exe reduce.exe reducefixed.exe upper.exe upperfixed.exe upperwhole.exe oneshot.exe sumpversion.exe billing.exe spgzip.exe lookup.exe gensort.exe valsort.exe map.exe red.exe
 
 sump.exe: sump.obj main.c
 	cl $(CFLAGS) sump.obj main.c $(LIBS)
 
-sump.obj: sump.c sump.h sump_win.c sump_win.h
+sump.obj: sump.c sump.h sump_win.c sump_win.h sumpversion.h
 	cl -c $(CFLAGS) sump.c
 
 libsump.dll: sump.obj
 	link /nologo /dll $(EXPORTS) sump.obj /out:libsump.dll
 
-reduce.exe: reduce.obj libsump.dll
-	cl $(CFLAGS) reduce.obj libsump.lib $(LIBS)
+reduce.exe: reduce.c libsump.dll
+	cl $(CFLAGS) reduce.c libsump.lib $(LIBS)
 
-reduce.obj: reduce.c
-	cl $(CFLAGS) -c reduce.c
+reducefixed.exe: reducefixed.c libsump.dll
+	cl $(CFLAGS) reducefixed.c libsump.lib $(LIBS)
 
-reducefixed.exe: reducefixed.obj libsump.dll
-	cl $(CFLAGS) reducefixed.obj libsump.lib $(LIBS)
+upper.exe: upper.c libsump.dll
+	cl $(CFLAGS) upper.c libsump.lib $(LIBS)
 
-reducefixed.obj: reducefixed.c
-	cl $(CFLAGS) -c reducefixed.c
+upperfixed.exe: upperfixed.c libsump.dll
+	cl $(CFLAGS) upperfixed.c libsump.lib $(LIBS)
 
-upper.exe: upper.obj libsump.dll
-	cl $(CFLAGS) upper.obj libsump.lib $(LIBS)
+upperwhole.exe: upperwhole.c libsump.dll
+	cl $(CFLAGS) upperwhole.c libsump.lib $(LIBS)
 
-upper.obj: upper.c
-	cl $(CFLAGS) -c upper.c
+oneshot.exe: oneshot.c libsump.dll
+	cl $(CFLAGS) oneshot.c libsump.lib $(LIBS)
 
-upperfixed.exe: upperfixed.obj libsump.dll
-	cl $(CFLAGS) upperfixed.obj libsump.lib $(LIBS)
+billing.exe: billing.c libsump.dll
+	cl $(CFLAGS) billing.c libsump.lib $(LIBS)
 
-upperfixed.obj: upperfixed.c
-	cl $(CFLAGS) -c upperfixed.c
+spgzip.exe: spgzip.c libsump.dll
+	cl $(CFLAGS) spgzip.c libsump.lib zdll.lib $(LIBS)
 
-upperwhole.exe: upperwhole.obj libsump.dll
-	cl $(CFLAGS) upperwhole.obj libsump.lib $(LIBS)
+lookup.exe: lookup.c libsump.dll
+	cl $(CFLAGS) lookup.c libsump.lib zdll.lib $(LIBS)
 
-upperwhole.obj: upperwhole.c
-	cl $(CFLAGS) -c upperwhole.c
+gensort.exe: gensort.c libsump.dll rand16.obj
+	cl $(CFLAGS) gensort.c rand16.obj libsump.lib zdll.lib $(LIBS)
 
-oneshot.exe: oneshot.obj libsump.dll
-	cl $(CFLAGS) oneshot.obj libsump.lib $(LIBS)
+valsort.exe: valsort.c libsump.dll rand16.obj
+	cl $(CFLAGS) valsort.c rand16.obj libsump.lib zdll.lib $(LIBS)
 
-oneshot.obj: oneshot.c
-	cl $(CFLAGS) -c oneshot.c
+map.exe: map.c libsump.dll
+	cl $(CFLAGS) map.c libsump.lib $(LIBS)
 
-billing.exe: billing.obj libsump.dll
-	cl $(CFLAGS) billing.obj libsump.lib $(LIBS)
+red.exe: red.c libsump.dll
+	cl $(CFLAGS) red.c libsump.lib $(LIBS)
 
-billing.obj: billing.c
-	cl $(CFLAGS) -c billing.c
-
-spgzip.exe: spgzip.obj libsump.dll
-	cl $(CFLAGS) spgzip.obj libsump.lib zdll.lib $(LIBS)
-
-spgzip.obj: spgzip.c
-	cl $(CFLAGS) /Izlib\include -c spgzip.c
-
-lookup.exe: lookup.obj libsump.dll
-	cl $(CFLAGS) lookup.obj libsump.lib zdll.lib $(LIBS)
-
-lookup.obj: lookup.c
-	cl $(CFLAGS) /Izlib\include -c lookup.c
-
-gensort.exe: gensort.obj libsump.dll rand16.obj
-	cl $(CFLAGS) gensort.obj rand16.obj libsump.lib zdll.lib $(LIBS)
-
-gensort.obj: gensort.c
-	cl $(CFLAGS) /Izlib\include -c gensort.c
-
-valsort.exe: valsort.obj libsump.dll rand16.obj
-	cl $(CFLAGS) valsort.obj rand16.obj libsump.lib zdll.lib $(LIBS)
-
-valsort.obj: valsort.c
-	cl $(CFLAGS) /Izlib\include -c valsort.c
-
-sumpversion.exe: sumpversion.obj libsump.dll
-	cl $(CFLAGS) sumpversion.obj libsump.lib $(LIBS)
-
-sumpversion.obj: sumpversion.c
-	cl $(CFLAGS) -c sumpversion.c
+sumpversion.exe: sumpversion.c libsump.dll
+	cl $(CFLAGS) sumpversion.c libsump.lib $(LIBS)
 
 rand16.obj: rand16.c rand16.h
 	cl -c $(CFLAGS) rand16.c
