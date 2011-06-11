@@ -100,6 +100,8 @@ int pthread_join(pthread_t th, void **value_ptr)
  */
 int pthread_create(pthread_t *t, void *dummy, void *(*main)(void *), void *arg)
 {
+    t->handle_closed = FALSE;
+    t->exit_code = 0;
     t->h = (HANDLE) _beginthreadex(NULL, 0, (LPTHREAD_START_ROUTINE)main, 
                                    arg, 0, &t->id);
     TRACE("pthread_create returns HANDLE: %d\n", t->h);
