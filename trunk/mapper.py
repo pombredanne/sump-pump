@@ -10,4 +10,4 @@ import re
 for line in sys.stdin:
   words = re.findall('[A-Za-z]+', line)
   for word in words:
-    print word.lower()+'\t'+str(1)    
+    print word.lower()+'\t1'
