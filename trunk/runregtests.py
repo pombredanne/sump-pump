@@ -101,19 +101,19 @@ for i in range(iteration_count):
               ' -THREADS=' + str(threads) 
     else:
         cmd = './sump -in_buf_size=' + str(randint(100,10000)) + \
-              ' python mapper.py < hounds.txt | ' \
+              ' map < hounds.txt | ' \
               'nsort -format:sep=tab -field=word,count,decimal,max=' + \
               str(randint(1,4)) + \
               ' -key:word -sum:count -nowarn -match | ' \
               './sump -in_buf_size=' + str(randint(100,1000)) +\
-              ' -group python reducer.py > rout.txt'
+              ' -group red > rout.txt'
         correctoutput = 'correct_hounds_wc.txt'
     print i, ' ', cmd
     ret = os.system(cmd)
     if ret != 0:
         print 'error: ', cmd, ' returned: ', ret
         sys.exit()
-    ret = os.system('cmp rout.txt ' + correctoutput)
+    ret = os.system('diff -b rout.txt ' + correctoutput)
     if ret != 0:
         print 'error: cmp returned: ', ret
         sys.exit()
