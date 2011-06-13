@@ -101,12 +101,12 @@ for i in range(iteration_count):
               ' -THREADS=' + str(threads) 
     else:
         cmd = './sump -in_buf_size=' + str(randint(100,10000)) + \
-              ' map < hounds.txt | ' \
+              ' ./map < hounds.txt | ' \
               'nsort -format:sep=tab -field=word,count,decimal,max=' + \
               str(randint(1,4)) + \
               ' -key:word -sum:count -nowarn -match | ' \
               './sump -in_buf_size=' + str(randint(100,1000)) +\
-              ' -group red > rout.txt'
+              ' -group ./red > rout.txt'
         correctoutput = 'correct_hounds_wc.txt'
     print i, ' ', cmd
     ret = os.system(cmd)
