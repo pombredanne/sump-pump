@@ -57,7 +57,7 @@ int main(int argc, char *argv[])
                 end++;
             } while (isalpha(*end));
             /* output the word, tab character and digit '1' */
-            printf("%.*s\t1\n", end - begin, begin);
+            printf("%.*s\t1\n", (int)(end - begin), begin);
             begin = end;
         }
     }
