@@ -87,16 +87,16 @@ billing.exe: billing.c libsump.dll
 	cl $(CFLAGS) billing.c libsump.lib $(LIBS)
 
 spgzip.exe: spgzip.c libsump.dll
-	cl $(CFLAGS) spgzip.c libsump.lib zdll.lib $(LIBS)
+	cl $(CFLAGS) /Izlib\include spgzip.c libsump.lib zdll.lib $(LIBS)
 
 lookup.exe: lookup.c libsump.dll
-	cl $(CFLAGS) lookup.c libsump.lib zdll.lib $(LIBS)
+	cl $(CFLAGS) /Izlib\include lookup.c libsump.lib zdll.lib $(LIBS)
 
 gensort.exe: gensort.c libsump.dll rand16.obj
-	cl $(CFLAGS) gensort.c rand16.obj libsump.lib zdll.lib $(LIBS)
+	cl $(CFLAGS) /Izlib\include gensort.c rand16.obj libsump.lib zdll.lib $(LIBS)
 
 valsort.exe: valsort.c libsump.dll rand16.obj
-	cl $(CFLAGS) valsort.c rand16.obj libsump.lib zdll.lib $(LIBS)
+	cl $(CFLAGS) /Izlib\include valsort.c rand16.obj libsump.lib zdll.lib $(LIBS)
 
 map.exe: map.c libsump.dll
 	cl $(CFLAGS) map.c libsump.lib $(LIBS)
