@@ -8,12 +8,13 @@
 include Make.version
 
 #regression tests and files
-REG_TESTS=reduce reducefixed upper upperfixed upperwhole oneshot sumpversion
+REG_TESTS=reduce reducefixed upper upperfixed upperwhole oneshot sumpversion \
+          map red
 REG_FILES=rin1.txt rin2.txt rin3.txt upper_correct.txt rout1_correct.txt \
           rout2_correct.txt rout3_correct.txt
 
 # performance tests and files
-PERF_TESTS=spgzip lookup billing gensort valsort
+PERF_TESTS=spgzip lookup billing gensort valsort map red
 PERF_FILES=lookupref.txt lookupin.txt spgzipinput billing_input.txt \
            billing_correct_output.txt sortoutput.txt word_100MB.txt
 
@@ -114,6 +115,12 @@ gensort: gensort.c rand16.o $(LIB)
 
 valsort: valsort.c rand16.o $(LIB)
 	gcc -g $(CFLAGS) -o valsort valsort.c rand16.o $(LIB) -lz 
+
+map: map.c rand16.o $(LIB)
+	gcc -g $(CFLAGS) -o map map.c $(LIB)
+
+red: red.c rand16.o $(LIB)
+	gcc -g $(CFLAGS) -o red red.c $(LIB)
 
 rand16.o: rand16.c rand16.h
 	gcc -g $(CFLAGS) -c rand16.c
