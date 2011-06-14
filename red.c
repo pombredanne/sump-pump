@@ -22,7 +22,7 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
  *
- * Usage: red [sump pump directives] < input_file > output_file
+ * Usage: red < input_file > output_file
  *
  */
 #include <stdio.h>
@@ -49,12 +49,18 @@ int main(int argc, char *argv[])
     char        buf[200];
     char        *tab;
     size_t      word_len;
+    size_t      line_len;
 
     for (;;)
     {
         /* if no more input lines, break out of loop */
         if (fgets(buf, sizeof(buf), stdin) == NULL)
             break;
+        if ((line_len = strlen(buf)) == 0 || buf[line_len - 1] != '\n')
+        {
+            fprintf(stderr, "input line read failure occured\n");
+            exit(1);
+        }
         if ((tab = strchr(buf, '\t')) == NULL)
         {
             fprintf(stderr, "red: can't find tab in: %s", buf);
