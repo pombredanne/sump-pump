@@ -20,7 +20,7 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
  *
- * Usage: map [sump pump directives] < input_file > output_file
+ * Usage: map < input_file > output_file
  *
  */
 #include <stdio.h>
@@ -35,31 +35,22 @@
 
 int main(int argc, char *argv[])
 {
-    char        *begin, *end;
-    char        buf[200];
+    int         c;
 
     for (;;)
     {
-        /* if can't read another input line, stop. */
-        if (fgets(buf, sizeof(buf), stdin) == NULL)
+        /* skip over any non-alphabetic characters */
+        while ((c = getchar()) != EOF && !isalpha(c))
+            continue;
+        if (c == EOF)
             break;
-        for (begin = buf; ; )
+        /* while alphabetic characters, output them */
+        do
         {
-            /* skip over any non-alphabetic chars */
-            while (*begin != '\0' && !isalpha(*begin))
-                begin++;
-            if (*begin == '\0')  /* if end of line */
-                break;
-            end = begin;
-            do  /* for each character in the word */
-            {
-                *end = tolower(*end);
-                end++;
-            } while (isalpha(*end));
-            /* output the word, tab character and digit '1' */
-            printf("%.*s\t1\n", (int)(end - begin), begin);
-            begin = end;
-        }
+            putchar(tolower(c));
+        } while ((c = getchar()) != EOF && isalpha(c));
+        /* output tab character, digit '1', and newline */
+        fwrite("\t1\n", 1, 3, stdout);
     }
     return (0);
 }
