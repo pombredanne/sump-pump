@@ -54,7 +54,11 @@ EXPORTS= /export:sp_get_version \
          /export:pfunc_mutex_lock \
          /export:pfunc_mutex_unlock 
 
-all: sump.exe reduce.exe reducefixed.exe upper.exe upperfixed.exe upperwhole.exe oneshot.exe sumpversion.exe billing.exe spgzip.exe lookup.exe gensort.exe valsort.exe map.exe red.exe
+all: sump.exe libsump.dll regtestprogs perftestprogs
+
+regtestprogs: sump.exe sumpversion.exe reduce.exe reducefixed.exe upper.exe upperfixed.exe upperwhole.exe oneshot.exe
+
+perftestprogs: sumpversion.exe billing.exe spgzip.exe lookup.exe gensort.exe valsort.exe map.exe red.exe
 
 sump.exe: sump.obj main.c
 	cl $(CFLAGS) sump.obj main.c $(LIBS)
