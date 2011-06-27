@@ -2,11 +2,24 @@ SUMP Pump Source Code Distribution
 $LastChangedDate$
 $Revision$
 
+What's New in Version 1.2.3?
+----------------------------
+- "sump" program
+- As an alternative to defining a pump function, the ability to invoke an
+  external program reading its standard input and writing to standard output.
+- A '-' character is now required before all sump pump directives in the
+  string passed to sp_start().  THIS IS INCOMPATIBLE WITH PROGRAMS WRITTEN
+  FOR PREVIOUS VERSIONS OF THE SUMP PUMP LIBRARY.
+- Windows 32-bit makefile (Make.win)
+
 Contents
 --------
   The SUMP Pump source code and associated include files:
       sump.c
       sump.h 
+      main.c
+      sump_win.c    (Windows only)
+      sump_win.h    (Windows only)
       sumpversion.c
       nsort.h
       nsorterrno.h
@@ -15,22 +28,21 @@ Contents
       Makefile
       Make.version
       exports.linux
+      Make.win
 
    Regression tests, regression input file generators and test script:
-
       oneshot.c
       reduce.c
       reducefixed.c
       upper.c
       upperfixed.c
       upperwhole.c
-      
       genreduce.py
-
       runregtests.py
+      hounds.txt
+      correct_hounds_wc.txt
 
    Performance tests, performance input file generators, and test script:
-
       billing.c
       gensort.c
       lookup.c
@@ -38,38 +50,54 @@ Contents
       rand16.h
       spgzip.c
       valsort.c
-
       genbilling.py
       gencsv.py
-
       runperftests.py
+      urlretrieve.py
+      mapper.py
+      reducer.py
+      wordcount.sh
 
    GNU GPL 2.0 License
-
       gpl-2.0.txt
 
 Directions
 ----------
-   To build the SUMP Pump Library, libsump.so.1
+   On Linux:
+      To build the SUMP Pump Library, libsump.so.1, and the "sump" executable
+         make
 
-      make
+      To build the regression tests, including input files
+         make reg
 
-   To build the regression tests, including input files
+      To run the regression tests
+         runregtests.py
 
-      make reg
+      To build the performance tests, including input files
+         make perf
 
-   To run the regression tests
+      To run the performance tests
+         runperftests.py
 
-      runregtests.py
+      To make everything
+         make all
 
-   To build the performance tests, including input files
+   On Windows 
+      (For nmake commands, must be inside Visual Studio Command Prompt window)
+      To build libsump.lib and libsump.dll
+         nmake -f Make.win libsump.dll
 
-      make perf
+      To build libsump.lib, libsump.dll and sump.exe
+         nmake -f Make.win sump.exe
 
-   To run the performance tests
+      To build all executables (including regression and performance tests)
+         nmake -f Make.win
 
-      runperftests.py
+      To build the regression and performance test files
+         make testfiles       (must be in cygwin environment)
 
-   To make everything
+      To run the regression tests
+         runregtests.py
 
-      make all
+      To run the performance tests
+         runperftests.py
