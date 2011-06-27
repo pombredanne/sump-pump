@@ -90,6 +90,13 @@ Directions
       To build libsump.lib, libsump.dll and sump.exe
          nmake -f Make.win sump.exe
 
+      To build regression test programs
+         nmake -f Make.win regtestprogs
+
+      To build performance test programs 
+         (currently only works in 32-bit mode, due to zlib dependence)
+         nmake -f Make.win perftestprogs
+
       To build all executables (including regression and performance tests)
          nmake -f Make.win
 
