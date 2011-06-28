@@ -10,7 +10,7 @@ What's New in Version 1.2.3?
 - A '-' character is now required before all sump pump directives in the
   string passed to sp_start().  THIS IS INCOMPATIBLE WITH PROGRAMS WRITTEN
   FOR PREVIOUS VERSIONS OF THE SUMP PUMP LIBRARY.
-- Windows 32-bit makefile (Make.win)
+- Windows makefile (Make.win)
 
 Contents
 --------
