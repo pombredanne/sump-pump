@@ -21,6 +21,7 @@ Contents
       sump_win.c    (Windows only)
       sump_win.h    (Windows only)
       sumpversion.c
+      sumpversion.h
       nsort.h
       nsorterrno.h
 
