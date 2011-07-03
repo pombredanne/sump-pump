@@ -42,6 +42,8 @@ Contents
       runregtests.py
       hounds.txt
       correct_hounds_wc.txt
+      map.c
+      red.c
 
    Performance tests, performance input file generators, and test script:
       billing.c
