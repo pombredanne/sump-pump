@@ -98,6 +98,7 @@ int main(int argc, char *argv[])
     if (argc == 1 || (argc > 1 && !strcmp(argv[1], "-?")))
     {
         fprintf(stderr, "%s", Sump_usage);
+        fprintf(stderr, "\nSUMP Pump version %s\n", sp_get_version());
         return (1);
     }
     
