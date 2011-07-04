@@ -81,6 +81,8 @@
 import os
 import sys
 import time
+import platform
+
 
 n_processors = 0
 run_count = 5
@@ -149,6 +151,10 @@ def run_program_set(cmd_base, cmd_suffix, io_bytes):
     return
 
 
+sysstr = platform.system()
+if ((len(sysstr) >= 6 and sysstr[0:6] == 'CYGWIN') or (len(sysstr) >= 7 and sysstr[0:7] == 'Windows')):
+    print 'SUMP Pump performance tests currently do not work on Cygwin or Windows, sorry.'
+    sys.exit(1)
 print 'SUMP Pump In-Memory Performance Tests'
 os.system('date')
 os.system('sumpversion')
