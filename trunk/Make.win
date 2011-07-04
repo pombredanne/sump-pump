@@ -56,7 +56,7 @@ EXPORTS= /export:sp_get_version \
 
 all: sump.exe libsump.dll regtestprogs perftestprogs
 
-regtestprogs: sump.exe sumpversion.exe reduce.exe reducefixed.exe upper.exe upperfixed.exe upperwhole.exe oneshot.exe
+regtestprogs: sump.exe sumpversion.exe reduce.exe reducefixed.exe upper.exe upperfixed.exe upperwhole.exe oneshot.exe map.exe red.exe
 
 perftestprogs: sumpversion.exe billing.exe spgzip.exe lookup.exe gensort.exe valsort.exe map.exe red.exe
 
