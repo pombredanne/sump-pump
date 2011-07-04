@@ -5078,6 +5078,7 @@ void sp_free(sp_t *caller_sp)
 
     sp_wait(sp); /* make sure sump pump has finished */
     
+#if !defined(SUMP_PUMP_NO_SORT)
     if (sp->flags & SP_SORT)
     {
         if (sp->sort_temp_buf != NULL)
@@ -5090,6 +5091,7 @@ void sp_free(sp_t *caller_sp)
             free(sp->out);
     }
     else
+#endif
     {
         if (sp->task != NULL)
         {
