@@ -90,24 +90,19 @@ Directions
       To build libsump.lib and libsump.dll
          nmake -f Make.win libsump.dll
 
-      To build libsump.lib, libsump.dll and sump.exe
+      To build sump.exe
          nmake -f Make.win sump.exe
 
       To build regression test programs
          nmake -f Make.win regtestprogs
 
-      To build performance test programs 
-         (currently only works in 32-bit mode, due to zlib dependence)
-         nmake -f Make.win perftestprogs
+      Performance test programs currently do not work on Windows
 
-      To build all executables (including regression and performance tests)
+      To build all executables (including regression tests)
          nmake -f Make.win
 
-      To build the regression and performance test files
-         make testfiles       (must be in cygwin environment)
+      To build the regression test files
+         make regtestfiles     (must be in cygwin environment)
 
       To run the regression tests
-         runregtests.py
-
-      To run the performance tests
-         runperftests.py
+         runregtests.py        (must be in cygwin environment)
