@@ -61,7 +61,7 @@ regtestprogs: sump.exe sumpversion.exe reduce.exe reducefixed.exe upper.exe uppe
 # note: sump pump performance tests currently do not run on Windows
 # perftestprogs: sumpversion.exe billing.exe spgzip.exe lookup.exe gensort.exe valsort.exe map.exe red.exe
 
-sump.exe: sump.obj main.c
+sump.exe: sump.obj main.c sump.h
 	cl $(CFLAGS) sump.obj main.c $(LIBS)
 
 sump.obj: sump.c sump.h sump_win.c sump_win.h sumpversion.h

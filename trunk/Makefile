@@ -43,7 +43,7 @@ $(LIB): sump.o
 sump.o: sump.c sump.h sumpversion.h
 	gcc -c $(PIC) $(CFLAGS) -g sump.c
 
-sump: sump.o main.c sump.h sumpversion.h
+sump: sump.o main.c sump.h
 	gcc -g $(CFLAGS) -o sump main.c sump.o -lpthread -ldl -lrt
 
 sumpversion.h: sump.c sump.h
