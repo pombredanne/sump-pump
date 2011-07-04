@@ -154,6 +154,9 @@ def run_program_set(cmd_base, cmd_suffix, io_bytes):
 sysstr = platform.system()
 if ((len(sysstr) >= 6 and sysstr[0:6] == 'CYGWIN') or (len(sysstr) >= 7 and sysstr[0:7] == 'Windows')):
     print 'SUMP Pump performance tests currently do not work on Cygwin or Windows, sorry.'
+    # The main problem here is that 'taskset', used to restrict the number 
+    # of processors used, is not available on Windows.  The other minor 
+    # problem is that zlib is only available as a 32-bit library.
     sys.exit(1)
 print 'SUMP Pump In-Memory Performance Tests'
 os.system('date')
@@ -166,7 +169,7 @@ if (os.popen('uname', 'r').readline() == 'Linux\n'):
     os.system('grep \"MemTotal\" /proc/meminfo')
 run_program_set('lookup', '', 913363767 + 609324195 + 364785068)
 run_program_set('billing billing_input.txt billing_output.txt', '', 535985261 + 505064050)
+run_program_set('wordcount.sh', '', 105311535 + 3101779)
 run_program_set('gensort 10000000 sortinput.txt', '', 0 + 1000000000)
 run_program_set('valsort sortoutput.txt', ' > /dev/null', 1000000000 + 0)
 run_program_set('spgzip', ' < spgzipinput > spgzipinput.gz', 274747890 + 139887849)
-run_program_set('wordcount.sh', '', 105311535 + 3101779)
