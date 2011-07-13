@@ -116,3 +116,26 @@ int pthread_key_delete(pthread_key_t);
 
 char *nt_strerror(int error, char *buf, size_t buf_size);
 
+int gettimeofday(struct timeval *, void *);
+
+
+# define O_DIRECT	0x8000
+
+struct aiocb {
+    HANDLE      aio_fildes;	/* file HANDLE */
+    void        *aio_buf; 	/* Data buffer */
+    size_t      aio_nbytes;	/* number of bytes of data */
+    HANDLE      aio_helper_event;/* helper waits on this before starting io */
+    int64_t     aio_offset;	/* file offset position */
+    OVERLAPPED  sump_over;
+    int         sump_errno;
+    int         sump_eof;
+};
+
+int aio_read(struct aiocb *aiocbp);
+int aio_write(struct aiocb *aiocbp);
+int aio_suspend(const struct aiocb * const cblist[], int n, void *timeout);
+ssize_t aio_return(struct aiocb *aiocbp);
+int aio_error(struct aiocb *aiocbp);
+
+
