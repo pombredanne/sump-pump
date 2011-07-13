@@ -49,25 +49,13 @@
 #include <io.h>
 #include <process.h>
 #include <time.h>
-
-/* declare default text or binary mode on non-Windows */
-#define DFLT_TXTBIN _O_BINARY  
+#include <sys/timeb.h>
 
 /* Convert the two DWORDs in a FILETIME (second and 100ns units) 
  * into a single uint64_t in microseconds
  */
 #define FILETIME_TO_US(filetime) \
     (((uint64_t) filetime.dwLowDateTime + ((uint64_t) filetime.dwHighDateTime << 32)) / 10)
-
-/* getpagesize
- */
-int getpagesize()
-{
-    SYSTEM_INFO si;
-    
-    GetSystemInfo(&si);
-    return (si.dwPageSize);
-}
 
 
 /* pthread_join - SUMP Pump on NT implementation of POSIX thread routine.
@@ -288,3 +276,151 @@ void pthread_exit(void *status)
 /* pthread_detatch - SUMP Pump on NT implementation of POSIX thread routine.
  */
 int pthread_detach(pthread_t th) { return (0); }
+
+
+
+/* gettimeofday - Windows implementation of Unix gettimeofday()
+ */
+int gettimeofday(struct timeval *tv, void *not_implemented)
+{
+    static uint64_t     frequency = 0;
+    LARGE_INTEGER       largeint;
+
+    if (frequency == 0)
+    {
+    	if (QueryPerformanceFrequency(&largeint) == 0)
+	    die("gettimeofday: QueryPerformanceFrequency error\n");
+	frequency = largeint.QuadPart;
+    }
+    if (QueryPerformanceCounter(&largeint) == 0)
+	die("gettimeofday: QueryPerformanceCounter error\n");
+
+    tv->tv_sec = largeint.QuadPart / frequency;
+    tv->tv_usec = (1000000 * (largeint.QuadPart % frequency)) / frequency;
+
+    return (0);
+}
+
+
+#define RETRY_LIMIT     10
+
+int aio_read(struct aiocb *aio)
+{
+    BOOL        ret;
+    int         err;
+    int         retry;
+    
+    aio->sump_eof = FALSE;
+    aio->sump_errno = 0;
+    for (retry = 0; retry < RETRY_LIMIT; retry++)
+    {
+        ResetEvent(aio->sump_over.hEvent);
+        aio->sump_over.Offset = (DWORD)aio->aio_offset;
+        aio->sump_over.OffsetHigh = (DWORD)(aio->aio_offset >> 32);
+        ret = ReadFile(aio->aio_fildes,
+                       aio->aio_buf,
+                       aio->aio_nbytes,
+                       NULL,
+                       &aio->sump_over);
+        err = GetLastError();
+        if (ret)
+            return (0);      /* success */
+        if (ret == 0)
+        {
+            if (err == ERROR_HANDLE_EOF)
+            {
+                aio->sump_eof = TRUE;
+                SetEvent(aio->sump_over.hEvent);
+                return (0);
+            }
+            if (err == ERROR_IO_PENDING)
+                return (0);     /* success so far */
+            if (err == ERROR_WORKING_SET_QUOTA ||
+                err == ERROR_INVALID_USER_BUFFER || 
+                err == ERROR_NOT_ENOUGH_MEMORY)
+            {
+                continue;
+            }
+        }
+    }
+    /* error occured, retries have been exhausted for transitory errors */
+    aio->sump_errno = err;
+    SetEvent(aio->sump_over.hEvent);
+    return (-1);
+}
+
+
+int aio_write(struct aiocb *aio)
+{
+    BOOL        ret;
+    int         err;
+    int         retry;
+    
+    aio->sump_eof = FALSE;
+    aio->sump_errno = 0;
+    for (retry = 0; retry < RETRY_LIMIT; retry++)
+    {
+        ResetEvent(aio->sump_over.hEvent);
+        aio->sump_over.Offset = (DWORD)aio->aio_offset;
+        aio->sump_over.OffsetHigh = (DWORD)(aio->aio_offset >> 32);
+        ret = WriteFile(aio->aio_fildes,
+                        aio->aio_buf,
+                        aio->aio_nbytes,
+                        NULL,
+                        &aio->sump_over);
+        err = GetLastError();
+        if (ret)
+            return (0);      /* success */
+        if (ret == 0)
+        {
+            if (err == ERROR_IO_PENDING)
+                return (0);     /* success so far */
+            if (err == ERROR_WORKING_SET_QUOTA ||
+                err == ERROR_INVALID_USER_BUFFER || 
+                err == ERROR_NOT_ENOUGH_MEMORY)
+            {
+                continue;
+            }
+        }
+    }
+    /* error occured, retries have been exhausted for transitory errors */
+    aio->sump_errno = err;
+    SetEvent(aio->sump_over.hEvent);
+    return (-1);
+}
+
+
+int aio_suspend(const struct aiocb * const cblist[], int n, void *timeout)
+{
+    int ret;
+
+    if (n != 1)
+        die("aio_suspend: n arg is not 1: %d\n", n);
+    if (timeout != NULL)
+        die("aio_suspend: timeout is not NULL\n");
+    if (cblist[0]->sump_eof)
+        return (0);
+    ret = WaitForSingleObject(cblist[0]->sump_over.hEvent, INFINITE);
+    if (ret != WAIT_OBJECT_0) 
+        die("aio_suspend: WaitForSingleObject failed: %d\n", ret);
+    return (0);
+}
+
+
+ssize_t aio_return(struct aiocb *aio)
+{
+    DWORD       result = 0;
+    
+    if (aio->sump_eof)
+        return (0);
+    if (!GetOverlappedResult(aio->aio_fildes, &aio->sump_over, &result, TRUE))
+        aio->sump_errno = GetLastError();
+    return (aio->sump_errno ? -1 : result);
+}
+
+
+int aio_error(struct aiocb *aio)
+{
+    return (aio->sump_errno);
+}
+
