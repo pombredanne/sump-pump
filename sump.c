@@ -46,6 +46,8 @@
  *     http://code.google.com/p/sump-pump/
  */
 
+#  define AIO_CAPABLE
+
 #if !defined(_WIN32)
 # define _GNU_SOURCE
 # include <pthread.h>
@@ -55,17 +57,31 @@
 # include <sys/mman.h>
 # include <sys/types.h>
 # include <sys/wait.h>
+# include <sys/time.h>
 # include <stdint.h>
 # include <ctype.h>
 # include <signal.h>
 
-# define DFLT_TXTBIN 0  /* no need to declare text or binary mode on non-Windows */
 # if !defined(__CYGWIN32__)
-#  define AIO_CAPABLE
 #  include <aio.h>
 #  include <sys/types.h>
 #  include <sys/stat.h>
 # endif
+
+# define PTFlld	"lld"
+# define PTFllu	"llu"
+# define PTFllx	"llx"
+
+# define ERRNO errno
+
+#else  /* now defined(_WIN32) */
+
+# define PTFlld	"I64d"
+# define PTFllu	"I64u"
+# define PTFllx	"I64x"
+
+# define ERRNO GetLastError()
+
 #endif  /* !defined(_WIN32) */
 
 #include "sump.h"
@@ -120,13 +136,8 @@ typedef int nsort_msg_t;        /* return status & error message numbers */
 
 #define ERROR_BUF_SIZE  500   /* size of error buffer */
 
-#if defined(win_nt)
-# define LAST_ERROR     GetLastError()
-#else
-# define LAST_ERROR     errno
-#endif
-
-static int Page_size = 4096;
+#define DEFAULT_BUFFERED_TRANSFER_SIZE  (1024 * 1024)
+#define DEFAULT_PIPE_TRANSFER_SIZE      8192
 
 
 /* state structure for a sump pump instance */
@@ -361,7 +372,7 @@ struct sp_file
     sp_t        sp;             /* sump pump this file */
     int         mode;           /* file access mode */
 #if defined(win_nt)
-    HANDLE      h;              /* file handle */
+    HANDLE      fd;             /* file handle */
 #else
     int         fd;             /* file descriptor */
 #endif
@@ -370,6 +381,8 @@ struct sp_file
     int         aio_count;      /* the max and target number of async i/o's */
     size_t      transfer_size;  /* read or write request size */
     int         error_code;     /* error code */
+    int         can_seek;       /* if true, then direct/async-capable file */
+    int         is_std;         /* file is either stdin, stdout or stderr */
 };
 
 /* file access modes */
@@ -408,7 +421,7 @@ struct sump_aio
     uint64_t            buf_index;      /* sump pump buffer index */
     size_t              buf_offset;     /* beginning io offset within buffer */
     char                last_buf_io;    /* boolean indicating last io for buf*/
-    off_t               file_offset;    /* file offset */
+    int64_t             file_offset;    /* file offset */
     size_t              nbytes;         /* request size */
     struct aiocb        aio;
 };
@@ -430,7 +443,66 @@ static int Zero_fd;
 static size_t Default_rw_test_size;
 
 /* default file access mode */
-static int Default_file_mode = MODE_BUFFERED;
+static int Default_file_mode = MODE_DIRECT;
+
+
+/* die - quit program due to a fatal sump pump infrastructure error.
+ */
+static void die(char *fmt, ...)
+{
+    va_list     ap;
+
+    fprintf(stderr, "sump pump fatal error: ");
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    exit(1);
+}
+
+
+#define PAGE_SIZE       page_size()
+
+/* page_size - internal routine to get the system page size.
+ */
+static int page_size()
+{
+    static int  size;
+
+    if (size == 0)
+    {
+#if defined(win_nt)
+        SYSTEM_INFO si;
+    
+        GetSystemInfo(&si);
+        size = si.dwPageSize;
+#else
+        size = getpagesize();
+#endif
+    }
+    return (size);
+}
+
+
+/* sp_get_time_us  - return elapsed time in microseconds.
+ *
+ *      The caller can discard the upper 32 bits *only* when timing intervals
+ *      less than ~4000 seconds = 1 hour 11 minutes.
+ */
+static uint64_t sp_get_time_us(void)
+{
+    struct timeval      time;
+    static uint64_t     begin;
+
+    if (begin == 0)  /* if first time */
+    {
+        if (gettimeofday(&time, NULL) < 0)
+            die("gettimeofday() failure\n");
+        begin = (time.tv_sec * (uint64_t)1000 * 1000) + time.tv_usec;
+    }
+    if (gettimeofday(&time, NULL) < 0)
+        die("gettimeofday() failure\n");
+    return (time.tv_sec * (uint64_t)1000 * 1000) + time.tv_usec - begin;
+}
 
 
 static FILE    *TraceFp;
@@ -441,7 +513,12 @@ static FILE    *TraceFp;
 static void trace(const char *fmt, ...)
 {
     va_list     ap;
+    uint64_t    diff = sp_get_time_us();
+    int	        seconds = (int)(diff / 1000000);
+    int         fractions = (int)(diff % 1000000);
 
+    fprintf(TraceFp, "%2d.%06d: ", seconds, fractions);
+    
     va_start(ap, fmt);
     vfprintf(TraceFp, fmt, ap);
     va_end(ap);
@@ -468,20 +545,6 @@ const char *sp_get_version(void)
 const char *sp_get_id(void)
 {
     return ("$Id$");
-}
-
-
-/* die - quit program due to a fatal sump pump infrastructure error.
- */
-static void die(char *fmt, ...)
-{
-    va_list     ap;
-
-    fprintf(stderr, "sump pump fatal error: ");
-    va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-    exit(1);
 }
 
 
@@ -1054,7 +1117,7 @@ void *pipe_reader(void *arg)
                 break;
             if (len < 0)
             {
-                pipe->perrno = LAST_ERROR;
+                pipe->perrno = ERRNO;
                 buf_bytes = 0;
                 break;
             }
@@ -1106,7 +1169,7 @@ void *pipe_reader(void *arg)
                 break;
             if (len < 0)
             {
-                pipe->perrno = LAST_ERROR;
+                pipe->perrno = ERRNO;
                 break;
             }
             total += len;
@@ -1348,12 +1411,10 @@ int pfunc_exec(sp_task_t t, void *unused)
 
         /* create thread for each of stdout and stderr */
         if (pthread_create(&out_thread, NULL, pipe_reader, &ex->out) != 0)
-            return (pfunc_error(t, "pthread_create out error: %d\n",
-                                LAST_ERROR));
+            return (pfunc_error(t, "pthread_create out error: %d\n", ERRNO));
 #if defined(SUMP_PIPE_STDERR)
         if (pthread_create(&err_thread, NULL, pipe_reader, &ex->err) != 0)
-            return (pfunc_error(t, "pthread_create err error: %d\n",
-                                LAST_ERROR));
+            return (pfunc_error(t, "pthread_create err error: %d\n", ERRNO));
 #endif
     }
     else
@@ -1392,7 +1453,7 @@ int pfunc_exec(sp_task_t t, void *unused)
 #else
         if (write(ex->in.wr_fd, in, in_size) != in_size)
 #endif
-            ex->in.perrno = LAST_ERROR;
+            ex->in.perrno = ERRNO;
     }
     else  /* the records are lines of text */
     {
@@ -1424,7 +1485,7 @@ int pfunc_exec(sp_task_t t, void *unused)
                             buf_bytes)
 #endif
                         {
-                            ex->in.perrno = LAST_ERROR;
+                            ex->in.perrno = ERRNO;
                             buf_bytes = 0;
                             break;
                         }
@@ -1454,7 +1515,7 @@ int pfunc_exec(sp_task_t t, void *unused)
 #else
             if (write(ex->in.wr_fd, ex->in_buf, buf_bytes) != buf_bytes)
 #endif
-                ex->in.perrno = LAST_ERROR;
+                ex->in.perrno = ERRNO;
         }
     }
     
@@ -1593,7 +1654,7 @@ static void *file_reader_test(void *arg)
 #if defined(win_nt)
         DWORD   rlen;
         
-        if (ReadFile(sp_src->h, read_buf, sp_src->transfer_size, &rlen, NULL))
+        if (ReadFile(sp_src->fd, read_buf, sp_src->transfer_size, &rlen, NULL))
             size = rlen;        /* success */
         else if (GetLastError() == ERROR_BROKEN_PIPE)
             size = 0;           /* eof */
@@ -1660,7 +1721,7 @@ static void *file_reader_buffered(void *arg)
             if (sp_src->transfer_size != 0 && request > sp_src->transfer_size)
                 request = sp_src->transfer_size;
 #if defined(win_nt)
-            if (ReadFile(sp_src->h, read_buf + filled_bytes,
+            if (ReadFile(sp_src->fd, read_buf + filled_bytes,
                          (DWORD)request, &rlen, NULL))
                 size = rlen;    /* success */
             else if (GetLastError() == ERROR_BROKEN_PIPE)
@@ -1693,6 +1754,13 @@ static void *file_reader_buffered(void *arg)
         if (eof)
             break;
     }
+#if defined(win_nt)
+    CloseHandle(sp_src->fd);
+    sp_src->fd = INVALID_HANDLE_VALUE;
+#else
+    /*close(sp_src->fd);*/
+    sp_src->fd = INVALID_FD;
+#endif
     TRACE("file_reader_buffered done: %d\n", sp_src->error_code);
     return (NULL);
 }
@@ -1707,12 +1775,9 @@ static void *file_writer_buffered(void *arg)
     ssize_t             size;
     sp_file_t           sp_dst = (sp_file_t)arg;
     sp_t                sp = sp_dst->sp;
-#if defined(win_nt)
-    HANDLE              h = sp_dst->h;
-    DWORD               wr_size;
     int64_t             file_size = 0;
-    LONG                high;
-    LONG                low;
+#if defined(win_nt)
+    DWORD               wr_size;
 #else
     int                 fd = sp_dst->fd;
 #endif      
@@ -1739,10 +1804,10 @@ static void *file_writer_buffered(void *arg)
             }
             break;
         }
-        TRACE("file_writer: writing %d bytes\n", size);  
+        TRACE("file_writer: writing %d bytes at offset %"PTFlld"\n",
+              size, file_size);  
 #if defined(win_nt)
-        file_size += size;
-        if (!WriteFile(h, buf, size, &wr_size, NULL))
+        if (!WriteFile(sp_dst->fd, buf, size, &wr_size, NULL))
 #else
         if (write(fd, buf, (unsigned int)size) != size)
 #endif
@@ -1755,25 +1820,15 @@ static void *file_writer_buffered(void *arg)
             TRACE("output file write error: %s\n", err_buf);
             break;
         }
+        file_size += size;
     }
-#if defined(win_nt)
-    if (buf != NULL && GetFileType(h) == FILE_TYPE_DISK)
+    if (buf != NULL && sp_dst->can_seek)
     {
-        high = file_size >> 32;
-        low = file_size & 0xFFFFFFFF;
-        if (SetFilePointer(h, low, &high, FILE_BEGIN) == 0xFFFFFFFF)
-        {
-            if (GetLastError() != NO_ERROR)
-            {
-                sp_raise_error(sp, SP_FILE_WRITE_ERROR,
-                               "%s: SetFilePointer() failure: %s\n",
-                               sp_dst->fname,
-                               get_error_msg(0, err_buf, sizeof(err_buf)));
-                sp_dst->error_code = SP_FILE_WRITE_ERROR;
-                TRACE("SetFilePointer() error: %s\n", err_buf);
-            }
-        }
-        if (!SetEndOfFile(h))
+#if defined(win_nt)
+        if (!SetEndOfFile(sp_dst->fd))
+#else
+        if (ftruncate(sp_dst->fd, file_size))
+#endif
         {
             sp_raise_error(sp, SP_FILE_WRITE_ERROR,
                            "%s: SetEndOfFile() failure: %s\n",
@@ -1783,6 +1838,13 @@ static void *file_writer_buffered(void *arg)
             TRACE("SetEndOfFile() error: %s\n", err_buf);
         }
     }
+    
+#if defined(win_nt)
+    CloseHandle(sp_dst->fd);
+    sp_dst->fd = INVALID_HANDLE_VALUE;
+#else
+    /*close(sp_dst->fd);*/
+    sp_dst->fd = INVALID_FD;
 #endif
     if (buf != NULL)
         free(buf);
@@ -1802,7 +1864,7 @@ static void *file_reader_direct(void *arg)
     ssize_t             request;
     size_t              in_buf_size;
     uint64_t            aios_started;
-    off_t               file_read_offset = 0;
+    int64_t             file_read_offset = 0;
     struct sump_aio     *spaio;
     struct aiocb        *aio;
     const struct aiocb  *cb[1];
@@ -1817,11 +1879,15 @@ static void *file_reader_direct(void *arg)
     size_t              next_buf_offset;
     char                *buf;
     int                 put_result;
+#if defined(win_nt)
+    int                 i;
+#endif
 
     if (sp_src->aio_count <= 0)
         aio_count = 2;
     else
         aio_count = sp_src->aio_count;
+    TRACE("file_reader_direct allocating %d aio structs\n", aio_count);
     spaio = (struct sump_aio *)calloc(sizeof(struct sump_aio), aio_count);
     if (spaio == NULL)
     {
@@ -1831,7 +1897,15 @@ static void *file_reader_direct(void *arg)
         TRACE("file_reader_direct done: %d\n", sp_src->error_code);
         return (NULL);
     }
-
+#if defined(win_nt)
+    for (i = 0; i < aio_count; i++)
+    {
+        spaio[i].aio.sump_over.hEvent = CreateEvent(NULL, 1, 0, NULL);
+        if (spaio[i].aio.sump_over.hEvent == NULL)
+            die("file_reader_direct, CreateEvent failed\n");
+    }
+#endif
+    
     /* keep looping until there is no additional input */
     next_in_buf = 0;
     next_buf_offset = 0;
@@ -1860,6 +1934,8 @@ static void *file_reader_direct(void *arg)
         spaio[start].nbytes = request;
         spaio[start].last_buf_io = (next_buf_offset + request == in_buf_size);
         next_buf_offset += request;
+        TRACE("file_reader: reading %d bytes at offset %"PTFlld"\n",
+              request, file_read_offset);
         if (next_buf_offset == in_buf_size)
         {
             next_in_buf++;
@@ -1867,14 +1943,14 @@ static void *file_reader_direct(void *arg)
         }
         if (aio_read(aio) < 0)
         {
+            get_error_msg(aio_error(aio), err_buf, sizeof(err_buf));
+            TRACE("file_reader_direct: read failed: %s\n", err_buf);
             sp_src->error_code = SP_FILE_READ_ERROR;
             sp_raise_error(sp, SP_FILE_READ_ERROR,
                            "%s: aio_read() failure: %s, "
-                           "offset: %lld, size: %lld\n",
-                           sp_src->fname,
-                           strerror_r(aio_error(&aio[start]), err_buf,
-                                      sizeof(err_buf)),
-                           file_read_offset, request);
+                           "offset: %"PTFlld", size: %"PTFlld"\n",
+                           sp_src->fname, err_buf,
+                           aio->aio_offset, (int64_t)request);
             break;
         }
         file_read_offset += request;
@@ -1893,11 +1969,11 @@ static void *file_reader_direct(void *arg)
         {
             sp_src->error_code = SP_FILE_READ_ERROR;
             sp_raise_error(sp, SP_FILE_READ_ERROR,
-                                                      "%s: aio_suspend() failure: %s, "
-                           "offset: %lld, size: %lld\n",
+                           "%s: aio_suspend() failure: %s, "
+                           "offset: %"PTFlld", size: %"PTFlld"\n",
                            sp_src->fname,
-                           strerror_r(errno, err_buf, sizeof(err_buf)),
-                           spaio[done].file_offset, request);
+                           get_error_msg(0, err_buf, sizeof(err_buf)),
+                           spaio[done].file_offset, (int64_t)request);
             break;
         }
         if ((size = aio_return(aio)) < 0)
@@ -1905,11 +1981,11 @@ static void *file_reader_direct(void *arg)
             sp_src->error_code = SP_FILE_READ_ERROR;
             sp_raise_error(sp, SP_FILE_READ_ERROR,
                            "%s: aio_return() failure: %s, "
-                           "offset: %lld, size: %lld\n",
+                           "offset: %"PTFlld", size: %"PTFlld"\n",
                            sp_src->fname,
-                           strerror_r(aio_error(aio), err_buf,
-                                      sizeof(err_buf)),
-                           spaio[done].file_offset, request);
+                           get_error_msg(aio_error(aio), err_buf,
+                                         sizeof(err_buf)),
+                           spaio[done].file_offset, (int64_t)request);
             break;
         }
 
@@ -1942,6 +2018,15 @@ static void *file_reader_direct(void *arg)
             break;
         }
     }
+#if defined(win_nt)
+    for (i = 0; i < aio_count; i++)
+        CloseHandle(spaio[i].aio.sump_over.hEvent);
+    CloseHandle(sp_src->fd);
+    sp_src->fd = INVALID_HANDLE_VALUE;
+#else
+    /*close(sp_src->fd);*/
+    sp_src->fd = INVALID_FD;
+#endif
     free(spaio);
     TRACE("file_reader_direct done: %d\n", sp_src->error_code);
     return (NULL);
@@ -1962,7 +2047,7 @@ static void *file_writer_direct(void *arg)
     ssize_t             request;
     uint64_t            aios_started;
     uint64_t            aios_completed;
-    off_t               file_write_offset = 0;
+    int64_t             file_write_offset = 0;
     struct sump_aio     *spaio;
     struct aiocb        *aio;
     const struct aiocb  *cb[1];
@@ -1973,7 +2058,12 @@ static void *file_writer_direct(void *arg)
     int                 eof;
     int                 ret;
     char                *remainder_start = NULL;
-    off_t               remainder_size = 0;
+    int64_t             remainder_size = 0;
+#if defined(win_nt)
+    LONG                high;
+    LONG                low;
+    int                 i;
+#endif
 
     if (sp_dst->aio_count <= 0)
         aio_count = 2;
@@ -2000,6 +2090,12 @@ static void *file_writer_direct(void *arg)
                        get_error_msg(0, err_buf, sizeof(err_buf)));
         sp_dst->error_code = SP_MEM_ALLOC_ERROR;
         return NULL;
+    }
+    for (i = 0; i < aio_count; i++)
+    {
+        spaio[i].aio.sump_over.hEvent = CreateEvent(NULL, 1, 0, NULL);
+        if (spaio[i].aio.sump_over.hEvent == NULL)
+            die("file_writer_direct, CreateEvent failed\n");
     }
 #else
     init_zero_fd();
@@ -2033,14 +2129,15 @@ static void *file_writer_direct(void *arg)
          */
         eof = (request < sp_dst->transfer_size);
         if (eof &&
-            (remainder_size = request % Page_size) != 0)
+            (remainder_size = request % PAGE_SIZE) != 0)
         {
             request -= remainder_size;
             remainder_start = (char *)aio->aio_buf + request;
         }
         if (request != 0)
         {
-            TRACE("file_writer_direct: writing %d bytes\n", request);  
+            TRACE("file_writer: writing %"PTFlld" bytes at offset %"PTFlld"\n",
+                  (int64_t)request, file_write_offset);  
             aio->aio_nbytes = request;
             aio->aio_offset = file_write_offset;
             spaio[start].buf_index = 0;    /* not used */
@@ -2055,8 +2152,8 @@ static void *file_writer_direct(void *arg)
                                "%s: aio_write() failure: %s, "
                                "offset: %lld, size: %lld\n",
                                sp_dst->fname,
-                               strerror_r(aio_error(&aio[start]), err_buf,
-                                          sizeof(err_buf)),
+                               get_error_msg(aio_error(&aio[start]), err_buf,
+                                             sizeof(err_buf)),
                                spaio[done].file_offset, request);
                 break;
             }
@@ -2081,8 +2178,12 @@ static void *file_writer_direct(void *arg)
             aio = &spaio[done].aio;
             request = spaio[done].nbytes;
             cb[0] = aio;
+#if defined(win_nt)
+            ret = aio_suspend(cb, 1, NULL);
+#else
             while ((ret = aio_suspend(cb, 1, NULL)) != 0 && errno == EINTR)
                 continue;
+#endif
             if (ret != 0)
             {
                 sp_dst->error_code = SP_FILE_WRITE_ERROR;
@@ -2090,7 +2191,7 @@ static void *file_writer_direct(void *arg)
                                "%s: aio_suspend() failure: %s, "
                                "offset: %lld, size: %lld\n",
                                sp_dst->fname,
-                               strerror_r(errno, err_buf, sizeof(err_buf)),
+                               get_error_msg(0, err_buf, sizeof(err_buf)),
                                spaio[done].file_offset, request);
                 break;
             }
@@ -2101,8 +2202,8 @@ static void *file_writer_direct(void *arg)
                                "%s: aio_return() failure: %s, "
                                "offset: %lld, size: %lld\n",
                                sp_dst->fname,
-                               strerror_r(aio_error(aio), err_buf,
-                                          sizeof(err_buf)),
+                               get_error_msg(aio_error(aio), err_buf,
+                                             sizeof(err_buf)),
                                spaio[done].file_offset, request);
                 break;
             }
@@ -2111,12 +2212,14 @@ static void *file_writer_direct(void *arg)
                 sp_dst->error_code = SP_FILE_WRITE_ERROR;
                 sp_raise_error(sp, SP_FILE_WRITE_ERROR,
                                "%s: aio_write() return failure: %s, "
-                               "offset: %lld, "
-                               "returned size %lld != requested size: %lld\n",
+                               "offset: %"PTFlld", "
+                               "returned size %"PTFlld
+                               " != requested size: %"PTFlld"\n",
                                sp_dst->fname,
-                               strerror_r(aio_error(aio), err_buf,
-                                          sizeof(err_buf)),
-                               spaio[done].file_offset, size, request);
+                               get_error_msg(aio_error(aio), err_buf,
+                                             sizeof(err_buf)),
+                               spaio[done].file_offset,
+                               (int64_t)size, (int64_t)request);
                 break;
             }
             aios_completed++;
@@ -2126,12 +2229,65 @@ static void *file_writer_direct(void *arg)
     }
     if (sp_dst->error_code == 0 && remainder_size != 0)
     {
-        int     fd;
+        TRACE("file_writer: writing remaining %"PTFlld" bytes at offset %"PTFlld"\n",
+              (int64_t)remainder_size, file_write_offset);
+#if defined(win_nt)
+        CloseHandle(sp_dst->fd);
+        sp_dst->fd = CreateFile(sp_dst->fname,
+                                GENERIC_WRITE,
+                                FILE_SHARE_READ,
+                                NULL,
+                                OPEN_ALWAYS,
+                                FILE_ATTRIBUTE_NORMAL,
+                                NULL);
+        if (sp_dst->fd == INVALID_HANDLE_VALUE)
+        {
+            sp_dst->error_code = SP_FILE_WRITE_ERROR;
+            sp_raise_error(sp, SP_FILE_WRITE_ERROR,
+                           "%s: remainder CreateFile() return failure: %s\n",
+                           sp_dst->fname,
+                           get_error_msg(0, err_buf, sizeof(err_buf)));
+        }
+        else
+        {
+            int err, wr_ret;
+            
+            aio = &spaio[0].aio;
+            aio->sump_over.Offset = (int)file_write_offset;
+            aio->sump_over.OffsetHigh = (int)(file_write_offset >> 32);
+            ResetEvent(aio->sump_over.hEvent);
+            wr_ret = WriteFile(sp_dst->fd, remainder_start, remainder_size,
+                               NULL, &aio->sump_over);
+            err = GetLastError();
+            if (wr_ret == 0 && err != ERROR_IO_PENDING)
+                ret = -1;
+            else
+            {
+                wr_ret = GetOverlappedResult(sp_dst->fd, &aio->sump_over,
+                                             &ret, TRUE);
+                if (wr_ret == 0)
+                    ret = -1;
+            }
 
-        /* close file descriptor opened with O_DIRECT */
+            if (ret != remainder_size)
+            {
+                sp_dst->error_code = SP_FILE_WRITE_ERROR;
+                sp_raise_error(sp, SP_FILE_WRITE_ERROR,
+                               "%s: pwrite() return failure: %s, "
+                               "offset: %I64d, "
+                               "returned size %d != requested size: %I64d\n",
+                               sp_dst->fname,
+                               get_error_msg(0, err_buf, sizeof(err_buf)),
+                               file_write_offset, ret, remainder_size);
+            }
+            else
+                file_write_offset += remainder_size;
+        }
+#else
+        /* close file descriptor that was opened with O_DIRECT */
         close(sp_dst->fd);
         /* reopen file without O_DIRECT */
-        if ((fd = open(sp_dst->fname, O_WRONLY | DFLT_TXTBIN, 0777)) < 0)
+        if ((sp_dst->fd = open(sp_dst->fname, O_WRONLY, 0777)) < 0)
         {
             sp_dst->error_code = SP_FILE_WRITE_ERROR;
             sp_raise_error(sp, SP_FILE_WRITE_ERROR,
@@ -2141,7 +2297,7 @@ static void *file_writer_direct(void *arg)
         }
         else
         {
-            ret = pwrite(fd, remainder_start,
+            ret = pwrite(sp_dst->fd, remainder_start,
                          remainder_size, file_write_offset);
             if (ret != remainder_size)
             {
@@ -2149,17 +2305,62 @@ static void *file_writer_direct(void *arg)
                 sp_raise_error(sp, SP_FILE_WRITE_ERROR,
                                "%s: pwrite() return failure: %s, "
                                "offset: %lld, "
-                               "returned size %lld != requested size: %lld\n",
+                               "returned size %d != requested size: %lld\n",
                                sp_dst->fname,
                                strerror_r(errno, err_buf, sizeof(err_buf)),
                                file_write_offset, ret, remainder_size);
             }
+            else
+                file_write_offset += remainder_size;
         }
+#endif
     }
 #if defined(win_nt)
+    /* truncate output file, since we didn't truncate it when we opened it. */
+    high = (LONG)(file_write_offset >> 32);
+    low = (LONG)(file_write_offset & 0xFFFFFFFF);
+    ret = SetFilePointer(sp_dst->fd, low, &high, FILE_BEGIN);
+    if (ret != low || high != (LONG)(file_write_offset >> 32))
+    {
+        if (GetLastError() != NO_ERROR)
+        {
+            sp_raise_error(sp, SP_FILE_WRITE_ERROR,
+                           "%s: SetFilePointer() failure: %s\n",
+                           sp_dst->fname,
+                           get_error_msg(0, err_buf, sizeof(err_buf)));
+            sp_dst->error_code = SP_FILE_WRITE_ERROR;
+            TRACE("SetFilePointer() error: %s\n", err_buf);
+        }
+        else if (!SetEndOfFile(sp_dst->fd))
+        {
+            sp_raise_error(sp, SP_FILE_WRITE_ERROR,
+                           "%s: SetEndOfFile() failure: %s\n",
+                           sp_dst->fname,
+                           get_error_msg(0, err_buf, sizeof(err_buf)));
+            sp_dst->error_code = SP_FILE_WRITE_ERROR;
+            TRACE("file_writer_direct: SetEndOfFile() error: %s\n", err_buf);
+        }
+    }
+
     VirtualFree(buf, alloc_size, MEM_RELEASE);
+    for (i = 0; i < aio_count; i++)
+        CloseHandle(spaio[i].aio.sump_over.hEvent);
+    CloseHandle(sp_dst->fd);
+    sp_dst->fd = INVALID_HANDLE_VALUE;
 #else
+    if (ftruncate(sp_dst->fd, file_write_offset))
+    {
+        sp_raise_error(sp, SP_FILE_WRITE_ERROR,
+                       "%s: SetEndOfFile() failure: %s\n",
+                       sp_dst->fname,
+                       get_error_msg(0, err_buf, sizeof(err_buf)));
+        sp_dst->error_code = SP_FILE_WRITE_ERROR;
+        TRACE("SetEndOfFile() error: %s\n", err_buf);
+    }
+    
     munmap(buf, alloc_size);
+    /*close(sp_dst->fd);*/
+    sp_dst->fd = INVALID_FD;
 #endif
     free(spaio);
     TRACE("file_writer_direct done: %d\n", sp_dst->error_code);
@@ -2392,7 +2593,7 @@ static void get_file_mods(sp_file_t spf, char *mods)
             p++;
             spf->aio_count = (int)get_numeric_arg(spf->sp, &p);
         }
-        else if (scan("TRANSFER", &p) && scan("TRANS", &p))
+        else if (scan("TRANSFER", &p) || scan("TRANS", &p))
         {
             if (*p != ':' && *p != '=')
             {
@@ -2424,6 +2625,7 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods, unsigned flags)
     char        *comma_char;
     int         fname_len;
     void        *(*reader_main)(void *);
+    int         is_stdin;
 
     if ((sp_src = (sp_file_t)calloc(1, sizeof(struct sp_file))) == NULL)
         return (NULL);
@@ -2437,60 +2639,120 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods, unsigned flags)
     sp_src->fname[fname_len] = '\0';
     if (comma_char != NULL)
         get_file_mods(sp_src, comma_char + 1);
-    if (sp_src->mode == MODE_UNSPECIFIED)
-        sp_src->mode = Default_file_mode;
-#if defined(AIO_CAPABLE)
-    if (sp_src->mode == MODE_DIRECT && strcmp(sp_src->fname, "<stdin>") != 0)
-    {
-        reader_main = file_reader_direct;
-        flags |= O_DIRECT;
-        if (sp_src->transfer_size == 0)
-            sp_src->transfer_size = 512 * 1024;
-        if (sp_src->aio_count == 0)
-            sp_src->aio_count = 4;
-    }
-    else
-#endif
-    {
-        if (Default_rw_test_size != 0)
-        {
-            reader_main = file_reader_test;
-            sp_src->transfer_size = Default_rw_test_size;
-        }
-        else
-            reader_main = file_reader_buffered;
-    }
-
+    
+    is_stdin = (strcmp(sp_src->fname, "<stdin>") == 0);
 #if defined(win_nt)
-    if (strcmp(sp_src->fname, "<stdin>") == 0)
+    if (is_stdin)
     {
-        sp_src->h = GetStdHandle(STD_INPUT_HANDLE);
+        sp_src->fd = GetStdHandle(STD_INPUT_HANDLE);
         if (sp_src->transfer_size == 0)
             /* there is a read size limit for keyboard input, but is this it?*/
             sp_src->transfer_size = 8192;
     }
     else
     {
-        sp_src->h = CreateFile(sp_src->fname,
-                               GENERIC_READ,
-                               FILE_SHARE_READ,
-                               NULL,
-                               OPEN_EXISTING,
-                               FILE_ATTRIBUTE_NORMAL,
-                               NULL);
-        if (sp_src->h == INVALID_HANDLE_VALUE)
+        sp_src->fd = CreateFile(sp_src->fname,
+                                GENERIC_READ,
+                                FILE_SHARE_READ,
+                                NULL,
+                                OPEN_EXISTING,
+                                FILE_ATTRIBUTE_NORMAL,
+                                NULL);
+        if (sp_src->fd == INVALID_HANDLE_VALUE)
             return (NULL);
+        sp_src->can_seek = (GetFileType(sp_src->fd) == FILE_TYPE_DISK);
     }
 #else
-    if (strcmp(sp_src->fname, "<stdin>") == 0)
+    if (is_stdin)
         sp_src->fd = 0;
     else
     {
-        sp_src->fd = open(sp_src->fname, flags | DFLT_TXTBIN);
+        struct stat     buf;
+        
+        sp_src->fd = open(sp_src->fname, 0);
         if (sp_src->fd < 0)
             return (NULL);
+        if (fstat(sp_src->fd, &buf) != 0)
+            return (NULL);
+        sp_src->can_seek = S_ISREG(buf.st_mode);
     }
 #endif
+    
+    if (sp_src->mode == MODE_UNSPECIFIED)
+        sp_src->mode = sp_src->can_seek ? Default_file_mode : MODE_BUFFERED;
+
+    /* if file mode is direct (whether by specification or default)
+     */
+    if (sp_src->mode == MODE_DIRECT)
+    {
+        /* if a transfer size has been specified that is not a multiple of the
+         * page size, then silently revert to buffered mode.
+         * We probably should instead stay with direct mode, allocate separate
+         * read buffers, and copy the data into the sump pump input buffers.
+         */
+        if (sp_src->transfer_size != 0 &&
+            sp_src->transfer_size % PAGE_SIZE != 0)
+        {
+            sp_src->mode = MODE_BUFFERED;
+        }
+        /* if input the input buffer size is not a multiple of the
+         * page size, then default to buffered.  This is because the input
+         * buffers are directly read into.
+         * Should there also be a requirement that the input buffer size be
+         * a multiple of the transfer size?
+         */
+        if (sp->in_buf_size % PAGE_SIZE != 0)
+            sp_src->mode = MODE_BUFFERED;
+    }
+
+#if defined(AIO_CAPABLE)
+    if (sp_src->can_seek && sp_src->mode == MODE_DIRECT)
+    {
+        reader_main = file_reader_direct;
+        if (sp_src->transfer_size == 0)
+            sp_src->transfer_size = 512 * 1024; /* probably should be larger
+                                                 * for Windows. */
+        if (sp_src->aio_count == 0)
+            sp_src->aio_count = 4;
+
+        /* now close file and reopen it as direct */
+# if defined(win_nt)
+        CloseHandle(sp_src->fd);
+        sp_src->fd = CreateFile(sp_src->fname,
+                                GENERIC_READ,
+                                FILE_SHARE_READ,
+                                NULL,
+                                OPEN_EXISTING,
+                                FILE_FLAG_NO_BUFFERING | FILE_FLAG_OVERLAPPED,
+                                NULL);
+        if (sp_src->fd == INVALID_HANDLE_VALUE)
+            return (NULL);
+# else
+        close(sp_src->fd);
+        sp_src->fd = open(sp_src->fname, O_DIRECT);
+        if (sp_src->fd < 0)
+            return (NULL);
+# endif
+    }
+    else
+#endif
+    {
+        if (Default_rw_test_size != 0)
+        {
+            /* test mode for some regression tests */
+            reader_main = file_reader_test;
+            sp_src->transfer_size = Default_rw_test_size;
+        }
+        else
+            reader_main = file_reader_buffered;
+        if (sp_src->transfer_size == 0)
+        {
+            if (sp_src->can_seek)  /* if normal file */
+                sp_src->transfer_size = DEFAULT_BUFFERED_TRANSFER_SIZE;
+            else
+                sp_src->transfer_size = DEFAULT_PIPE_TRANSFER_SIZE;
+        }
+    }
     
     /* create reader thread */
     if (pthread_create(&sp_src->thread, NULL, reader_main, sp_src) != 0)
@@ -2512,7 +2774,6 @@ sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods)
     char                *comma_char;
     int                 fname_len;
     void                *(*writer_main)(void *);
-    unsigned            flags = 0;
 
     if ((sp_dst = (sp_file_t)calloc(1, sizeof(struct sp_file))) == NULL)
         return (NULL);
@@ -2526,44 +2787,24 @@ sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods)
     sp_dst->fname[fname_len] = '\0';
     if (comma_char != NULL)
         get_file_mods(sp_dst, comma_char + 1);
-    if (sp_dst->mode == MODE_UNSPECIFIED)
-        sp_dst->mode = Default_file_mode;
-#if defined(AIO_CAPABLE)
-    if (sp_dst->mode == MODE_DIRECT &&
-        strcmp(sp_dst->fname, "<stdout>") != 0 &&
-        strcmp(sp_dst->fname, "<stderr>") != 0)
-    {
-        writer_main = file_writer_direct;
-        flags |= O_DIRECT;
-        if (sp_dst->transfer_size == 0)
-            sp_dst->transfer_size = 512 * 1024;
-        if (sp_dst->aio_count == 0)
-            sp_dst->aio_count = 4;
-    }
-    else
-#endif
-    {
-        writer_main = file_writer_buffered;
-        if (Default_rw_test_size != 0)
-            sp_dst->transfer_size = Default_rw_test_size;
-    }
 
 #if defined(win_nt)
     if (strcmp(sp_dst->fname, "<stdout>") == 0)
-        sp_dst->h = GetStdHandle(STD_OUTPUT_HANDLE);
+        sp_dst->fd = GetStdHandle(STD_OUTPUT_HANDLE);
     else if (strcmp(sp_dst->fname, "<stderr>") == 0)
-        sp_dst->h = GetStdHandle(STD_ERROR_HANDLE);
+        sp_dst->fd = GetStdHandle(STD_ERROR_HANDLE);
     else
     {
-        sp_dst->h = CreateFile(sp_dst->fname,
-                               GENERIC_WRITE,
-                               FILE_SHARE_READ,
-                               NULL,
-                               OPEN_ALWAYS,
-                               FILE_ATTRIBUTE_NORMAL,
-                               NULL);
-        if (sp_dst->h == INVALID_HANDLE_VALUE)
+        sp_dst->fd = CreateFile(sp_dst->fname,
+                                GENERIC_WRITE,
+                                FILE_SHARE_READ,
+                                NULL,
+                                OPEN_ALWAYS,
+                                FILE_ATTRIBUTE_NORMAL,
+                                NULL);
+        if (sp_dst->fd == INVALID_HANDLE_VALUE)
             return (NULL);
+        sp_dst->can_seek = (GetFileType(sp_dst->fd) == FILE_TYPE_DISK);
     }
 #else
     if (strcmp(sp_dst->fname, "<stdout>") == 0)
@@ -2572,16 +2813,65 @@ sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods)
         sp_dst->fd = 2;
     else
     {
-        flags |= O_WRONLY | O_CREAT | O_TRUNC | DFLT_TXTBIN;
-        sp_dst->fd = open(sp_dst->fname, flags, 0777);
+        struct stat     buf;
+        
+        sp_dst->fd = open(sp_dst->fname, O_WRONLY | O_CREAT, 0777);
         if (sp_dst->fd < 0)
             return (NULL);
+        if (fstat(sp_dst->fd, &buf) != 0)
+            return (NULL);
+        sp_dst->can_seek = S_ISREG(buf.st_mode);
     }
 #endif
+
+    if (sp_dst->mode == MODE_UNSPECIFIED)
+        sp_dst->mode = sp_dst->can_seek ? Default_file_mode : MODE_BUFFERED;
+
+#if defined(AIO_CAPABLE)
+    if (sp_dst->can_seek && sp_dst->mode == MODE_DIRECT)
+    {
+        writer_main = file_writer_direct;
+        if (sp_dst->transfer_size == 0)
+            sp_dst->transfer_size = 512 * 1024;
+        if (sp_dst->aio_count == 0)
+            sp_dst->aio_count = 4;
+
+        /* now close file and reopen it as direct */
+# if defined(win_nt)
+        CloseHandle(sp_dst->fd);
+        sp_dst->fd = CreateFile(sp_dst->fname,
+                                GENERIC_WRITE,
+                                FILE_SHARE_READ,
+                                NULL,
+                                OPEN_ALWAYS,
+                                FILE_FLAG_NO_BUFFERING | FILE_FLAG_OVERLAPPED,
+                                NULL);
+        if (sp_dst->fd == INVALID_HANDLE_VALUE)
+            return (NULL);
+# else
+        close(sp_dst->fd);
+        sp_dst->fd = open(sp_dst->fname, O_DIRECT | O_WRONLY | O_CREAT, 0777);
+        if (sp_dst->fd < 0)
+            return (NULL);
+# endif
+    }
+    else
+#endif
+    {
+        writer_main = file_writer_buffered;
+        if (sp_dst->transfer_size == 0)
+        {
+            if (Default_rw_test_size != 0)
+                sp_dst->transfer_size = Default_rw_test_size;
+            else if (sp_dst->can_seek)  /* if normal file */
+                sp_dst->transfer_size = DEFAULT_BUFFERED_TRANSFER_SIZE;
+            else
+                sp_dst->transfer_size = DEFAULT_PIPE_TRANSFER_SIZE;
+        }
+    }
+
     sp_dst->out_index = out_index;
-    if (sp_dst->transfer_size == 0)
-        sp_dst->transfer_size =
-            Default_rw_test_size ? Default_rw_test_size : 4096;
+
     /* create writer thread */
     if ((ret = pthread_create(&sp_dst->thread, NULL, writer_main, sp_dst)))
         die("sp_open_file_dst: pthread_create() ret: %d\n", ret);
@@ -4858,7 +5148,7 @@ int sp_start(sp_t *caller_sp,
         size_t  buf_size;
 
         /* round up buf size to page size multiple */
-        buf_size = ((sp->in_buf_size + Page_size - 1) / Page_size) * Page_size;
+        buf_size = ((sp->in_buf_size + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE;
 #if defined(win_nt)
         sp->in_buf[i].in_buf = 
             VirtualAlloc(NULL, buf_size, MEM_COMMIT, PAGE_READWRITE);
@@ -5184,22 +5474,3 @@ void sp_file_free(sp_file_t *caller_sp_file)
     
     *caller_sp_file = NULL;
 }
-
-
-#if 0
-/* sp_get_time_us  - return elapsed time in microseconds.
- *
- *      The caller can discard the upper 32 bits *only* when timing intervals
- *      less than ~4000 seconds = 1 hour 11 minutes.
- */
-sp_time_t sp_get_time_us(void)
-{
-    struct timeval      time;
-
-    if (gettimeofday(&time, NULL) < 0)
-        bzero(&time, sizeof(struct timeval));
-    return (time.tv_sec * (sp_time_t)1000 * 1000) + time.tv_usec;
-}
-#endif
-
-
