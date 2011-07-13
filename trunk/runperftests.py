@@ -95,7 +95,7 @@ def clear_buffered_files():
 
 def run_program(cmd_base, cmd_suffix, processors_used, run_count, silent, io_bytes):
     results = []
-    cmd = cmd_base + ' -threads=' + str(processors_used) + cmd_suffix
+    cmd = cmd_base + ' -threads=' + str(processors_used) + cmd_suffix + ' -default_file_mode=buffered'
     
     # if less than all processors are used, then use processor
     if (processors_used < n_processors):   
