@@ -2575,15 +2575,15 @@ static void get_file_mods(sp_file_t spf, char *mods)
             p++;
         if (*p == '\0')
             break;
-        else if (scan("BUFFERED", &p))
+        else if (scan("BUFFERED", &p) || scan("BUF", &p))
         {
             spf->mode = MODE_BUFFERED;
         }
-        else if (scan("DIRECT", &p))
+        else if (scan("DIRECT", &p) || scan("DIR", &p))
         {
             spf->mode = MODE_DIRECT;
         }
-        else if (scan("COUNT", &p))
+        else if (scan("COUNT", &p) || scan("CO", &p))
         {
             if (*p != ':' && *p != '=')
             {
@@ -2593,7 +2593,7 @@ static void get_file_mods(sp_file_t spf, char *mods)
             p++;
             spf->aio_count = (int)get_numeric_arg(spf->sp, &p);
         }
-        else if (scan("TRANSFER", &p) || scan("TRANS", &p))
+        else if (scan("TRANSFER", &p) || scan("TRANS", &p) || scan("TR", &p))
         {
             if (*p != ':' && *p != '=')
             {
@@ -2616,10 +2616,34 @@ static void get_file_mods(sp_file_t spf, char *mods)
 /* sp_open_file_src - use the specified file as the input for the
  *                    specified sump pump.
  *
+ * Parameters:
+ *      sp -          sp_t identifier for which we are opening the input file.
+ *      fname_mods -  Name of the file, potentially followed by one or more
+ *                    of the following modifiers (with no intervening spaces):
+ *                    ,BUFFERED or ,BUF The file will be read with normal
+ *                                      buffered (not direct) reads.
+ *                    ,DIRECT or ,DIR   The file will be read with direct
+ *                                      and asynchronous reads.
+ *                    ,TRANSFER=%d{k,m,g} or ,TRANS=%d{k,m,g} or ,TR=%d{k,m,g}
+ *                                      The transfer size (read request size)
+ *                                      is specified in kilo, mega or giga
+ *                                      bytes.
+ *                    ,COUNT=%d or ,CO=%d  The count of the maximum number of
+ *                                      outstanding asynchronous read requests
+ *                                      is given.
+ *                    Example:
+ *                       myfilename,dir,trans=4m,co=4
+ *                                      The above example specifies a file
+ *                                      name of "myfilename", with direct
+ *                                      and asynchronous reads, with a
+ *                                      request size of 4 MB, and a maximum
+ *                                      of 4 outstanding asynchronous read
+ *                                      requests at any time.
+ *
  * Returns: NULL if an error occurs in opening the file, otherwise
  *          a valid sump pump file structure.
  */
-sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods, unsigned flags)
+sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods)
 {
     sp_file_t   sp_src;
     char        *comma_char;
@@ -2763,6 +2787,31 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods, unsigned flags)
 
 /* sp_open_file_dst - use the specified file as the output for the
  *                    specified output of the specified sump pump.
+ *
+ * Parameters:
+ *      sp -          sp_t identifier for which we are opening an output file.
+ *      out_index -   Integer indicating the sump pump output index.
+ *      fname_mods -  Name of the file, potentially followed by one or more
+ *                    of the following modifiers (with no intervening spaces):
+ *                    ,BUFFERED or ,BUF The file will be written with normal
+ *                                      buffered (not direct) writes.
+ *                    ,DIRECT or ,DIR   The file will be written with direct
+ *                                      and asynchronous writes.
+ *                    ,TRANSFER=%d{k,m,g} or ,TRANS=%d{k,m,g} or ,TR=%d{k,m,g}
+ *                                      The transfer size (write request size)
+ *                                      is specified in kilo, mega or giga
+ *                                      bytes.
+ *                    ,COUNT=%d or ,CO=%d  The count of the maximum number of
+ *                                      outstanding asynchronous write requests
+ *                                      is given.
+ *                    Example:
+ *                       myfilename,dir,trans=4m,co=4
+ *                                      The above example specifies a file
+ *                                      name of "myfilename", with direct
+ *                                      and asynchronous writes, with a
+ *                                      request size of 4 MB, and a maximum
+ *                                      of 4 outstanding asynchronous write
+ *                                      requests at any time.
  *
  * Returns: NULL if an error occurs in opening the file, otherwise
  *          a valid sump pump file structure.
@@ -4736,6 +4785,10 @@ static void get_exec_args(sp_t sp, char **ep)
  *                                        should be written into the sump pump
  *                                        either by calls to sp_write_input()
  *                                        or sp_start_link()
+ *                                        The input file name can be followed
+ *                                        by options that control the file
+ *                                        access mode and transfer size.
+ *                                        See sp_open_file_src() comments.
  *                    -IN_BUF_SIZE=%d{k,m,g} Overrides default input buffer
  *                                        size (256kb). If a 'k', 'm' or 'g'
  *                                        suffix is specified, the specified
@@ -4749,6 +4802,10 @@ static void get_exec_args(sp_t sp, char **ep)
  *                                        defined, the output should be read
  *                                        either by calls to sp_read_output()
  *                                        or by sp_start_link().
+ *                                        The output file name can be followed
+ *                                        by options that control the file
+ *                                        access mode and transfer size.
+ *                                        See sp_open_file_dst() comments.
  *                    -OUT_BUF_SIZE[%d]=%d{x,k,m,g} Overrides default output
  *                                        buffer size (2x the input buf size)
  *                                        for the specified output index, or
@@ -5245,7 +5302,7 @@ int sp_start(sp_t *caller_sp,
     if (sp->in_file != NULL)
     {
         /* start an input file connection */
-        sp->in_file_sp = sp_open_file_src(sp, sp->in_file, O_RDONLY);
+        sp->in_file_sp = sp_open_file_src(sp, sp->in_file);
         if (sp->in_file_sp == NULL)
         {
             start_error(sp, "%s: %s\n", sp->in_file,
