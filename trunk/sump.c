@@ -2650,6 +2650,7 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods)
     int         fname_len;
     void        *(*reader_main)(void *);
     int         is_stdin;
+    int         specified_mode;
 
     if ((sp_src = (sp_file_t)calloc(1, sizeof(struct sp_file))) == NULL)
         return (NULL);
@@ -2664,6 +2665,7 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods)
     if (comma_char != NULL)
         get_file_mods(sp_src, comma_char + 1);
     
+    specified_mode = sp_src->mode;
     is_stdin = (strcmp(sp_src->fname, "<stdin>") == 0);
 #if defined(win_nt)
     if (is_stdin)
@@ -2672,6 +2674,7 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods)
         if (sp_src->transfer_size == 0)
             /* there is a read size limit for keyboard input, but is this it?*/
             sp_src->transfer_size = 8192;
+        sp_src->mode = MODE_BUFFERED;
     }
     else
     {
@@ -2688,7 +2691,10 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods)
     }
 #else
     if (is_stdin)
+    {
         sp_src->fd = 0;
+        sp_src->mode = MODE_BUFFERED;
+    }        
     else
     {
         struct stat     buf;
@@ -2701,7 +2707,15 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods)
         sp_src->can_seek = S_ISREG(buf.st_mode);
     }
 #endif
-    
+
+    /* if direct mode was specified, but it is not a file */
+    if (specified_mode == MODE_DIRECT && !sp_src->can_seek)
+    {
+        start_error(sp, "direct mode reads were requested for file %s, but "
+                    "it is not a normal file\n", sp_src->fname);
+        return (NULL);
+    }
+
     if (sp_src->mode == MODE_UNSPECIFIED)
         sp_src->mode = sp_src->can_seek ? Default_file_mode : MODE_BUFFERED;
 
@@ -2718,15 +2732,40 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods)
             sp_src->transfer_size % PAGE_SIZE != 0)
         {
             sp_src->mode = MODE_BUFFERED;
+            start_error(sp, "direct mode reads for file %s,"
+                        " but the specified transfer size is not a "
+                        "multiple of the page size\n", sp_src->fname);
+            return (NULL);
         }
-        /* if input the input buffer size is not a multiple of the
-         * page size, then default to buffered.  This is because the input
-         * buffers are directly read into.
-         * Should there also be a requirement that the input buffer size be
-         * a multiple of the transfer size?
+        /* if transfer size has been set and the input buffer size is not a
+         * multiple of it, then default to buffered.  This is because the 
+         * input buffers are directly read into.
+         * We could use vectored reads to eliminate this restriction.
+         */
+        if (sp_src->transfer_size != 0 &&
+            sp->in_buf_size % sp_src->transfer_size != 0)
+        {
+            sp_src->mode = MODE_BUFFERED;
+            start_error(sp, "direct mode reads for file %s, but "
+                        "the sump pump input buffer size is not a multiple "
+                        "of the specified transfer size\n", sp_src->fname);
+            return (NULL);
+        }
+        /* if the input buffer size is not a multiple of the page size
          */
         if (sp->in_buf_size % PAGE_SIZE != 0)
+        {
+            /* flag error if direct was specified, otherwise use buffered */
+            if (specified_mode == MODE_DIRECT)
+            {
+                start_error(sp,
+                            "direct mode reads were specified for file %s, "
+                            "but the sump pump input buffer size is not a "
+                            "multiple of the page size\n", sp_src->fname);
+                return (NULL);
+            }
             sp_src->mode = MODE_BUFFERED;
+        }
     }
 
 #if defined(AIO_CAPABLE)
@@ -2823,6 +2862,7 @@ sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods)
     char                *comma_char;
     int                 fname_len;
     void                *(*writer_main)(void *);
+    int                 specified_mode;
 
     if ((sp_dst = (sp_file_t)calloc(1, sizeof(struct sp_file))) == NULL)
         return (NULL);
@@ -2837,6 +2877,7 @@ sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods)
     if (comma_char != NULL)
         get_file_mods(sp_dst, comma_char + 1);
 
+    specified_mode = sp_dst->mode;
 #if defined(win_nt)
     if (strcmp(sp_dst->fname, "<stdout>") == 0)
         sp_dst->fd = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -2873,8 +2914,36 @@ sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods)
     }
 #endif
 
+    /* if direct mode was specified but file is not a normal file */
+    if (specified_mode == MODE_DIRECT && !sp_dst->can_seek)
+    {
+        start_error(sp, "direct mode writes were requested for file %s, but "
+                    "it is not a file\n", sp_dst->fname);
+        return (NULL);
+    }
+
     if (sp_dst->mode == MODE_UNSPECIFIED)
         sp_dst->mode = sp_dst->can_seek ? Default_file_mode : MODE_BUFFERED;
+
+    /* if file mode is direct (whether by specification or default)
+     */
+    if (sp_dst->mode == MODE_DIRECT)
+    {
+        /* if a transfer size has been specified that is not a multiple of the
+         * page size, then silently revert to buffered mode.
+         * We probably should instead stay with direct mode, allocate separate
+         * read buffers, and copy the data into the sump pump input buffers.
+         */
+        if (sp_dst->transfer_size != 0 &&
+            sp_dst->transfer_size % PAGE_SIZE != 0)
+        {
+            sp_dst->mode = MODE_BUFFERED;
+            start_error(sp, "direct mode writes for file %s"
+                        ", but the transfer size is not a "
+                        "multiple of the page size\n", sp_dst->fname);
+            return (NULL);
+        }
+    }
 
 #if defined(AIO_CAPABLE)
     if (sp_dst->can_seek && sp_dst->mode == MODE_DIRECT)
@@ -2918,7 +2987,7 @@ sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods)
                 sp_dst->transfer_size = DEFAULT_PIPE_TRANSFER_SIZE;
         }
     }
-
+    
     sp_dst->out_index = out_index;
 
     /* create writer thread */
