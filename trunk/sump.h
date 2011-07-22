@@ -132,8 +132,8 @@ const char *sp_get_id(void);
  *                    multiple sump pump threads at once. If an external
  *                    program name is specified in the arg_fmt string, this
  *                    parameter can and must be NULL.
- *      arg_fmt -     Printf-format-like string that can be used with
- *                    subsequent arguments as follows:
+ *      arg_fmt -     Printf-format-like string that can be used to specify
+ *                    the following sump pump directives:
  *                    -ASCII or -UTF_8    Input records are ascii/utf-8 
  *                                        characters delimited by a newline
  *                                        character.
@@ -206,6 +206,13 @@ const char *sp_get_id(void);
  *                                        should be defined.  Instead,
  *                                        processing is done by whole input
  *                                        buffers.
+ *                    -DEFAULT_FILE_MODE={BUFFERED,BUF,DIRECT,DIR}  Set the
+ *                                        default file access mode for both
+ *                                        input and output files.  If none is
+ *                                        specified, the direct mode is used
+ *                                        to access input and output files for
+ *                                        which a BUFFERED file modifier is
+ *                                        not specified.
  *                    [external_program_name external_program_arguments]
  *                                        The name of an external program and
  *                                        its arguments. The program name
@@ -219,6 +226,9 @@ const char *sp_get_id(void);
  *      ...           potential subsequent arguments to arg_fmt
  *
  * Returns: SP_OK or a sump pump error code
+ *
+ * The sump pump directives can also appear in a SUMP_PUMP environment
+ * variable.
  */
 int sp_start(sp_t *sp, sp_pump_t pump_func, char *arg_fmt, ...);
 
