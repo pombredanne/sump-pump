@@ -26,7 +26,7 @@ sump $1 mapper.py < word_100MB.txt | \
 #                                        "count" is numeric and max of 4 digits
 #  -key:word      Key is "word" field.
 #  -sum:count     Summarize count field when deleting recs with duplicate keys.
-#  -nowarn        Suppress warnings, especially the one that warns that.
+#  -nowarn        Suppress warnings, especially the one that warns that
 #                 duplicate records were not deleted because maximum size
 #                 of the "count" field would be exceeded.
 #  -match         Output extra information that allows downstream sump pump
