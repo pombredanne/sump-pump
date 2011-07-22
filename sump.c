@@ -2711,8 +2711,8 @@ sp_file_t sp_open_file_src(sp_t sp, const char *fname_mods)
     /* if direct mode was specified, but it is not a file */
     if (specified_mode == MODE_DIRECT && !sp_src->can_seek)
     {
-        start_error(sp, "direct mode reads were requested for file %s, but "
-                    "it is not a normal file\n", sp_src->fname);
+        start_error(sp, "direct mode reads were requested for file %s, but it"
+                    " is either not a normal file or stdin\n", sp_src->fname);
         return (NULL);
     }
 
@@ -2917,8 +2917,8 @@ sp_file_t sp_open_file_dst(sp_t sp, unsigned out_index, const char *fname_mods)
     /* if direct mode was specified but file is not a normal file */
     if (specified_mode == MODE_DIRECT && !sp_dst->can_seek)
     {
-        start_error(sp, "direct mode writes were requested for file %s, but "
-                    "it is not a file\n", sp_dst->fname);
+        start_error(sp, "direct mode writes were requested for file %s, but it"
+                    " is either not a file or stdout/stderr\n", sp_dst->fname);
         return (NULL);
     }
 
@@ -4836,8 +4836,8 @@ static void get_exec_args(sp_t sp, char **ep)
  *                    multiple sump pump threads at once. If an external
  *                    program name is specified in the arg_fmt string, this
  *                    parameter can and must be NULL.
- *      arg_fmt -     Printf-format-like string that can be used with
- *                    subsequent arguments as follows:
+ *      arg_fmt -     Printf-format-like string that can be used to specify
+ *                    the following sump pump directives:
  *                    -ASCII or -UTF_8    Input records are ascii/utf-8 
  *                                        characters delimited by a newline
  *                                        character.
@@ -4910,6 +4910,13 @@ static void get_exec_args(sp_t sp, char **ep)
  *                                        should be defined.  Instead,
  *                                        processing is done by whole input
  *                                        buffers.
+ *                    -DEFAULT_FILE_MODE={BUFFERED,BUF,DIRECT,DIR}  Set the
+ *                                        default file access mode for both
+ *                                        input and output files.  If none is
+ *                                        specified, the direct mode is used
+ *                                        to access input and output files for
+ *                                        which a BUFFERED file modifier is
+ *                                        not specified.
  *                    [external_program_name external_program_arguments]
  *                                        The name of an external program and
  *                                        its arguments. The program name
@@ -4923,6 +4930,9 @@ static void get_exec_args(sp_t sp, char **ep)
  *      ...           potential subsequent arguments to arg_fmt
  *
  * Returns: SP_OK or a sump pump error code
+ *
+ * The sump pump directives can also appear in a SUMP_PUMP environment
+ * variable.
  */
 int sp_start(sp_t *caller_sp,
              sp_pump_t pump_func,
@@ -4936,6 +4946,7 @@ int sp_start(sp_t *caller_sp,
     int                 ret;
     char                *p;
     int                 index;
+    char                *args;
     char                err_buf[200];
     
     if (TraceFp == NULL &&
@@ -4983,12 +4994,27 @@ int sp_start(sp_t *caller_sp,
 
     sp->pump_func = pump_func;
 
+    if ((p = getenv("SUMP_PUMP")) == NULL)
+    {
+        /* allocate minimal string */
+        args = (char *)calloc(1, 1);
+        args[0] = '\0';
+    }
+    else
+    {
+        args = (char *)calloc(strlen(p) + 2, 1);
+        memcpy(args, p, strlen(p));
+        /* add newline to separate potential following commands */
+        args[strlen(p)] = '\n';
+        args[strlen(p) + 1] = '\0';
+    }
+
     if (arg_fmt != NULL)
     {
         va_list ap;
-        char    *args;
         size_t  args_size;
-        
+
+        p = args;
         va_start(ap, arg_fmt);
 #if defined(win_nt)
         args_size = _vscprintf(arg_fmt, ap);
@@ -4996,209 +5022,212 @@ int sp_start(sp_t *caller_sp,
         args_size = vsnprintf(NULL, 0, arg_fmt, ap);
 #endif
         va_end(ap);
-        args = (char *)calloc(args_size + 1, 1);
+        args = (char *)calloc(strlen(p) + args_size + 1, 1);
+        memcpy(args, p, strlen(p));
         va_start(ap, arg_fmt);
-        if (vsnprintf(args, args_size + 1, arg_fmt, ap) != args_size)
+        if (vsnprintf(args + strlen(p), args_size + 1, arg_fmt, ap) !=
+            args_size)
         {
             start_error(sp, "sp_start: "
                         "vnsprintf failed to return %d\n", args_size);
             return (sp->error_code);
         }
         va_end(ap);
+        free(p);   /* free copy of environment string */
         TRACE("sp_start args: '%s'\n", args);
-        p = args;
-        for (;;)
-        {
-            /* ignore leading white space chars */
-            while (isspace(*(unsigned char *)p))
-                p++;
-            if (*p == '\0')
-                break;
-            if (*p++ != '-')
-            {
-                /* Must be the name of an external program, and possibly
-                 * some command line arguments for it.
-                 */
-                p--;
-                sp->flags |= SP_EXEC;
-#if defined(SUMP_PIPE_STDERR)
-                if (sp->num_outputs == 1)
-                {
-                    sp->out = (struct sump_out *)
-                        realloc(sp->out, 2 * sizeof(struct sump_out));
-                    if (sp->out == NULL)
-                    {
-                        start_error(sp, "set_num_outputs, realloc() failed\n");
-                        return (sp->error_code);
-                    }
-                    memset(sp->out + 1, 0, sizeof(struct sump_out));
-                    sp->out[1].buf_size = sp->out[0].buf_size;
-                    sp->num_outputs = 2;
-                }
-#endif
-                get_exec_args(sp, &p);
-                if (sp->error_code)
-                    return (sp->error_code);
-            }
-            else if (scan("ASCII", &p) || scan("UTF_8", &p))
-            {
-                sp->flags |= SP_UTF_8;
-            }
-            else if (scan("DEFAULT_FILE_MODE=", &p))
-            {
-                if (scan("BUFFERED", &p))
-                    Default_file_mode = MODE_BUFFERED;
-                else if (scan("DIRECT", &p))
-                    Default_file_mode = MODE_DIRECT;
-                else
-                    syntax_error(sp, p, "unrecognized file access mode");
-            }
-            else if (scan("GROUP_BY", &p) || scan("GROUP", &p))
-                sp->flags |= SP_GROUP_BY;
-            else if (scan("IN_BUFS=", &p))
-                sp->num_in_bufs = (unsigned)get_numeric_arg(sp, &p);
-            else if (scan("IN_BUF_SIZE=", &p))
-            {
-                sp->in_buf_size = (ssize_t)get_numeric_arg(sp, &p);
-                sp->in_buf_size *= (ssize_t)get_scale(&p);
-            }
-            else if (scan("IN_FILE=", &p) || scan("IN=", &p))
-            {
-                /* get input file here */
-                sp->in_file = get_string_arg(&p);
-                sp->in_file_alloc = TRUE;
-            }
-            else if (scan("OUT_BUF_SIZE", &p))
-            {
-                size_t  size;
-                double  incr;
-                
-                if (*p == '=')   /* if no index in square brackets */
-                {
-                    index = 0;   /* default to index 0 */
-                    p++;
-                }
-                else
-                    index = get_output_index(sp, &p);
-                if (*p == '.')
-                    size = 0;
-                else
-                    size = (int)get_numeric_arg(sp, &p);
-                if (*p == '.' || *p == 'x' || *p == 'X')
-                {
-                    sp->out[index].buf_size_mult = (double)size;
-                    if (*p == '.')
-                    {
-                        p++;
-                        incr = 0.1;
-                        while (*p >= '0' && *p <= '9')
-                        {
-                            sp->out[index].buf_size_mult +=
-                                (*p - '0') * incr;
-                            incr *= 0.1;
-                            p++;
-                        }
-                    }
-                    if (*p != 'x' && *p != 'X')
-                    {
-                        start_error(sp, "sp_start: "
-                                    "out buf size factor must end with 'x'\n");
-                        return (sp->error_code);
-                    }
-                    p++;
-                    sp->out[index].size_specified = FALSE;
-                }
-                else
-                {
-                    sp->out[index].buf_size = size;
-                    sp->out[index].buf_size *= (size_t)get_scale(&p);
-                    sp->out[index].size_specified = TRUE;
-                }
-            }
-            else if (scan("OUT_FILE", &p) || scan("OUT", &p))
-            {
-                if (*p == '=')   /* if no index in square brackets */
-                {
-                    index = 0;   /* default to index 0 */
-                    p++;
-                }
-                else
-                    index = get_output_index(sp, &p);
-                if (index >= sp->num_outputs)
-                {
-                    start_error(sp, "sp_start: "
-                                "output file index must be less than the "
-                                "number of output files\n");
-                    return (sp->error_code);
-                }
-                sp->out[index].file = get_string_arg(&p);
-                sp->out[index].file_alloc = TRUE;
-            }
-            else if (scan("OUTPUTS=", &p))
-            {
-                unsigned        num_outputs;
-                
-                num_outputs = (unsigned)get_numeric_arg(sp, &p);
-                if (num_outputs > sp->num_outputs)
-                {
-                    sp->out = (struct sump_out *)realloc(sp->out,
-                                                         num_outputs * sizeof(struct sump_out));
-                    if (sp->out == NULL)
-                    {
-                        start_error(sp, "set_num_outputs, realloc() failed\n");
-                        return (sp->error_code);
-                    }
-                    for (i = sp->num_outputs; i < num_outputs; i++)
-                    {
-                        memset(sp->out + i, 0, sizeof(struct sump_out));
-                        sp->out[i].buf_size = sp->out[0].buf_size;
-                    }
-                }
-                sp->num_outputs = num_outputs;
-            }
-            else if (scan("WHOLE_BUF", &p) || scan("WHOLE", &p))
-            {
-                sp->flags &= ~SP_UTF_8;
-                sp->flags |= SP_WHOLE_BUF;
-            }
-            else if (scan("REC_SIZE=", &p))
-            {
-                sp->rec_size = (int)get_numeric_arg(sp, &p);
-                sp->flags &= ~SP_UTF_8;
-                sp->flags |= SP_FIXED;
-                if (sp->rec_size <= 0)
-                {
-                    start_error(sp, "sp_start: "
-                                "REC_SIZE must be greater than 0\n");
-                    return (sp->error_code);
-                }
-            }
-            else if (scan("RW_TEST_SIZE=", &p))
-            {
-                Default_rw_test_size = (size_t)get_numeric_arg(sp, &p);
-                Default_rw_test_size *= (size_t)get_scale(&p);
-            }
-            else if (scan("TASKS=", &p))
-            {
-                sp->num_in_bufs = sp->num_tasks =
-                    (unsigned)get_numeric_arg(sp, &p);
-            }
-            else if (scan("THREADS=", &p))
-            {
-                int     num_threads;
-                
-                num_threads = (int)get_numeric_arg(sp, &p);
-                if (num_threads > 0)
-                    sp->num_threads = (unsigned)num_threads;
-            }
-            else
-                syntax_error(sp, p, "unrecognized keyword");
+    }
 
+    for (p = args; ; )
+    {
+        /* ignore leading white space chars */
+        while (isspace(*(unsigned char *)p))
+            p++;
+        if (*p == '\0')
+            break;
+        if (*p++ != '-')
+        {
+            /* Must be the name of an external program, and possibly
+             * some command line arguments for it.
+             */
+            p--;
+            sp->flags |= SP_EXEC;
+#if defined(SUMP_PIPE_STDERR)
+            if (sp->num_outputs == 1)
+            {
+                sp->out = (struct sump_out *)
+                    realloc(sp->out, 2 * sizeof(struct sump_out));
+                if (sp->out == NULL)
+                {
+                    start_error(sp, "set_num_outputs, realloc() failed\n");
+                    return (sp->error_code);
+                }
+                memset(sp->out + 1, 0, sizeof(struct sump_out));
+                sp->out[1].buf_size = sp->out[0].buf_size;
+                sp->num_outputs = 2;
+            }
+#endif
+            get_exec_args(sp, &p);
             if (sp->error_code)
                 return (sp->error_code);
         }
-        free(args);
+        else if (scan("ASCII", &p) || scan("UTF_8", &p))
+        {
+            sp->flags |= SP_UTF_8;
+        }
+        else if (scan("DEFAULT_FILE_MODE=", &p))
+        {
+            if (scan("BUFFERED", &p) || scan("BUF", &p))
+                Default_file_mode = MODE_BUFFERED;
+            else if (scan("DIRECT", &p) || scan("DIR", &p))
+                Default_file_mode = MODE_DIRECT;
+            else
+                syntax_error(sp, p, "unrecognized file access mode");
+        }
+        else if (scan("GROUP_BY", &p) || scan("GROUP", &p))
+            sp->flags |= SP_GROUP_BY;
+        else if (scan("IN_BUFS=", &p))
+            sp->num_in_bufs = (unsigned)get_numeric_arg(sp, &p);
+        else if (scan("IN_BUF_SIZE=", &p))
+        {
+            sp->in_buf_size = (ssize_t)get_numeric_arg(sp, &p);
+            sp->in_buf_size *= (ssize_t)get_scale(&p);
+        }
+        else if (scan("IN_FILE=", &p) || scan("IN=", &p))
+        {
+            /* get input file here */
+            sp->in_file = get_string_arg(&p);
+            sp->in_file_alloc = TRUE;
+        }
+        else if (scan("OUT_BUF_SIZE", &p))
+        {
+            size_t  size;
+            double  incr;
+                
+            if (*p == '=')   /* if no index in square brackets */
+            {
+                index = 0;   /* default to index 0 */
+                p++;
+            }
+            else
+                index = get_output_index(sp, &p);
+            if (*p == '.')
+                size = 0;
+            else
+                size = (int)get_numeric_arg(sp, &p);
+            if (*p == '.' || *p == 'x' || *p == 'X')
+            {
+                sp->out[index].buf_size_mult = (double)size;
+                if (*p == '.')
+                {
+                    p++;
+                    incr = 0.1;
+                    while (*p >= '0' && *p <= '9')
+                    {
+                        sp->out[index].buf_size_mult +=
+                            (*p - '0') * incr;
+                        incr *= 0.1;
+                        p++;
+                    }
+                }
+                if (*p != 'x' && *p != 'X')
+                {
+                    start_error(sp, "sp_start: "
+                                "out buf size factor must end with 'x'\n");
+                    return (sp->error_code);
+                }
+                p++;
+                sp->out[index].size_specified = FALSE;
+            }
+            else
+            {
+                sp->out[index].buf_size = size;
+                sp->out[index].buf_size *= (size_t)get_scale(&p);
+                sp->out[index].size_specified = TRUE;
+            }
+        }
+        else if (scan("OUT_FILE", &p) || scan("OUT", &p))
+        {
+            if (*p == '=')   /* if no index in square brackets */
+            {
+                index = 0;   /* default to index 0 */
+                p++;
+            }
+            else
+                index = get_output_index(sp, &p);
+            if (index >= sp->num_outputs)
+            {
+                start_error(sp, "sp_start: "
+                            "output file index must be less than the "
+                            "number of output files\n");
+                return (sp->error_code);
+            }
+            sp->out[index].file = get_string_arg(&p);
+            sp->out[index].file_alloc = TRUE;
+        }
+        else if (scan("OUTPUTS=", &p))
+        {
+            unsigned        num_outputs;
+                
+            num_outputs = (unsigned)get_numeric_arg(sp, &p);
+            if (num_outputs > sp->num_outputs)
+            {
+                sp->out = (struct sump_out *)realloc(sp->out,
+                                                     num_outputs * sizeof(struct sump_out));
+                if (sp->out == NULL)
+                {
+                    start_error(sp, "set_num_outputs, realloc() failed\n");
+                    return (sp->error_code);
+                }
+                for (i = sp->num_outputs; i < num_outputs; i++)
+                {
+                    memset(sp->out + i, 0, sizeof(struct sump_out));
+                    sp->out[i].buf_size = sp->out[0].buf_size;
+                }
+            }
+            sp->num_outputs = num_outputs;
+        }
+        else if (scan("WHOLE_BUF", &p) || scan("WHOLE", &p))
+        {
+            sp->flags &= ~SP_UTF_8;
+            sp->flags |= SP_WHOLE_BUF;
+        }
+        else if (scan("REC_SIZE=", &p))
+        {
+            sp->rec_size = (int)get_numeric_arg(sp, &p);
+            sp->flags &= ~SP_UTF_8;
+            sp->flags |= SP_FIXED;
+            if (sp->rec_size <= 0)
+            {
+                start_error(sp, "sp_start: "
+                            "REC_SIZE must be greater than 0\n");
+                return (sp->error_code);
+            }
+        }
+        else if (scan("RW_TEST_SIZE=", &p))
+        {
+            Default_rw_test_size = (size_t)get_numeric_arg(sp, &p);
+            Default_rw_test_size *= (size_t)get_scale(&p);
+        }
+        else if (scan("TASKS=", &p))
+        {
+            sp->num_in_bufs = sp->num_tasks =
+                (unsigned)get_numeric_arg(sp, &p);
+        }
+        else if (scan("THREADS=", &p))
+        {
+            int     num_threads;
+                
+            num_threads = (int)get_numeric_arg(sp, &p);
+            if (num_threads > 0)
+                sp->num_threads = (unsigned)num_threads;
+        }
+        else
+            syntax_error(sp, p, "unrecognized keyword");
+
+        if (sp->error_code)
+            return (sp->error_code);
     }
+    free(args);
 
     if (REC_TYPE(sp) == 0)
     {
