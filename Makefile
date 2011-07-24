@@ -11,7 +11,7 @@ include Make.version
 REG_TESTS=reduce reducefixed upper upperfixed upperwhole oneshot sumpversion \
           map red
 REG_FILES=rin1.txt rin2.txt rin3.txt upper_correct.txt rout1_correct.txt \
-          rout2_correct.txt rout3_correct.txt
+          rout2_correct.txt rout3_correct.txt word_100MB.txt
 
 # performance tests and files
 PERF_TESTS=spgzip lookup billing gensort valsort map red
@@ -153,3 +153,4 @@ word_100MB.txt:
 	urlretrieve.py http://mapreduce.stanford.edu/datafiles/word_count.tar.gz word_count.tar.gz
 	gzip -dc < word_count.tar.gz | tar xvf - word_count_datafiles/word_100MB.txt
 	mv word_count_datafiles/word_100MB.txt .
+	rmdir word_count_datafiles
