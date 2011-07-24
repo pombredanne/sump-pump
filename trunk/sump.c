@@ -1831,11 +1831,11 @@ static void *file_writer_buffered(void *arg)
 #endif
         {
             sp_raise_error(sp, SP_FILE_WRITE_ERROR,
-                           "%s: SetEndOfFile() failure: %s\n",
+                           "%s: truncate failure: %s\n",
                            sp_dst->fname,
                            get_error_msg(0, err_buf, sizeof(err_buf)));
             sp_dst->error_code = SP_FILE_WRITE_ERROR;
-            TRACE("SetEndOfFile() error: %s\n", err_buf);
+            TRACE("truncate error: %s\n", err_buf);
         }
     }
     
@@ -2079,7 +2079,8 @@ static void *file_writer_direct(void *arg)
         return (NULL);
     }
 
-    TRACE("file_writer_direct: allocating %d buffer bytes\n", sp_dst->transfer_size);
+    TRACE("file_writer_direct[%d]: allocating %d buffer bytes\n",
+          out_index, sp_dst->transfer_size);
     alloc_size = sp_dst->transfer_size * aio_count;
 #if defined(win_nt)
     buf = VirtualAlloc(NULL, alloc_size, MEM_COMMIT, PAGE_READWRITE);
@@ -2136,8 +2137,8 @@ static void *file_writer_direct(void *arg)
         }
         if (request != 0)
         {
-            TRACE("file_writer: writing %"PTFlld" bytes at offset %"PTFlld"\n",
-                  (int64_t)request, file_write_offset);  
+            TRACE("file_writer[%d]: writing %"PTFlld" bytes at offset %"PTFlld"\n",
+                  out_index, (int64_t)request, file_write_offset);  
             aio->aio_nbytes = request;
             aio->aio_offset = file_write_offset;
             spaio[start].buf_index = 0;    /* not used */
@@ -2229,8 +2230,8 @@ static void *file_writer_direct(void *arg)
     }
     if (sp_dst->error_code == 0 && remainder_size != 0)
     {
-        TRACE("file_writer: writing remaining %"PTFlld" bytes at offset %"PTFlld"\n",
-              (int64_t)remainder_size, file_write_offset);
+        TRACE("file_writer[%d]: writing remaining %"PTFlld" bytes at offset %"PTFlld"\n",
+              out_index, (int64_t)remainder_size, file_write_offset);
 #if defined(win_nt)
         CloseHandle(sp_dst->fd);
         sp_dst->fd = CreateFile(sp_dst->fname,
@@ -2320,27 +2321,29 @@ static void *file_writer_direct(void *arg)
     high = (LONG)(file_write_offset >> 32);
     low = (LONG)(file_write_offset & 0xFFFFFFFF);
     ret = SetFilePointer(sp_dst->fd, low, &high, FILE_BEGIN);
-    if (ret != low || high != (LONG)(file_write_offset >> 32))
+    if (ret == INVALID_SET_FILE_POINTER && GetLastError() != NO_ERROR)
     {
-        if (GetLastError() != NO_ERROR)
-        {
-            sp_raise_error(sp, SP_FILE_WRITE_ERROR,
-                           "%s: SetFilePointer() failure: %s\n",
-                           sp_dst->fname,
-                           get_error_msg(0, err_buf, sizeof(err_buf)));
-            sp_dst->error_code = SP_FILE_WRITE_ERROR;
-            TRACE("SetFilePointer() error: %s\n", err_buf);
-        }
-        else if (!SetEndOfFile(sp_dst->fd))
-        {
-            sp_raise_error(sp, SP_FILE_WRITE_ERROR,
-                           "%s: SetEndOfFile() failure: %s\n",
-                           sp_dst->fname,
-                           get_error_msg(0, err_buf, sizeof(err_buf)));
-            sp_dst->error_code = SP_FILE_WRITE_ERROR;
-            TRACE("file_writer_direct: SetEndOfFile() error: %s\n", err_buf);
-        }
+        sp_raise_error(sp, SP_FILE_WRITE_ERROR,
+                       "%s: SetFilePointer() failure: %s\n",
+                       sp_dst->fname,
+                       get_error_msg(0, err_buf, sizeof(err_buf)));
+        sp_dst->error_code = SP_FILE_WRITE_ERROR;
+        TRACE("file_writer_direct[%d]: SetFilePointer() error: %s\n",
+              out_index, err_buf);
     }
+    else if (!SetEndOfFile(sp_dst->fd))
+    {
+        sp_raise_error(sp, SP_FILE_WRITE_ERROR,
+                       "%s: SetEndOfFile() failure: %s\n",
+                       sp_dst->fname,
+                       get_error_msg(0, err_buf, sizeof(err_buf)));
+        sp_dst->error_code = SP_FILE_WRITE_ERROR;
+        TRACE("file_writer_direct[%d]: SetEndOfFile() error: %s\n",
+              out_index, err_buf);
+    }
+    else
+        TRACE("file_writer_direct[%d]: truncated file to %I64d bytes\n",
+              out_index, file_write_offset);
 
     VirtualFree(buf, alloc_size, MEM_RELEASE);
     for (i = 0; i < aio_count; i++)
@@ -2351,11 +2354,12 @@ static void *file_writer_direct(void *arg)
     if (ftruncate(sp_dst->fd, file_write_offset))
     {
         sp_raise_error(sp, SP_FILE_WRITE_ERROR,
-                       "%s: SetEndOfFile() failure: %s\n",
+                       "%s: ftruncate() failure: %s\n",
                        sp_dst->fname,
                        get_error_msg(0, err_buf, sizeof(err_buf)));
         sp_dst->error_code = SP_FILE_WRITE_ERROR;
-        TRACE("SetEndOfFile() error: %s\n", err_buf);
+        TRACE("file_writer_direct[%d]: ftruncate() error: %s\n",
+              out_index, err_buf);
     }
     
     munmap(buf, alloc_size);
@@ -2363,7 +2367,7 @@ static void *file_writer_direct(void *arg)
     sp_dst->fd = INVALID_FD;
 #endif
     free(spaio);
-    TRACE("file_writer_direct done: %d\n", sp_dst->error_code);
+    TRACE("file_writer_direct[%d] done: %d\n", out_index, sp_dst->error_code);
     return NULL;
 }
 
