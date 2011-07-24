@@ -11,7 +11,7 @@ include Make.version
 REG_TESTS=reduce reducefixed upper upperfixed upperwhole oneshot sumpversion \
           map red
 REG_FILES=rin1.txt rin2.txt rin3.txt upper_correct.txt rout1_correct.txt \
-          rout2_correct.txt rout3_correct.txt word_100MB.txt
+          rout2_correct.txt rout3_correct.txt
 
 # performance tests and files
 PERF_TESTS=spgzip lookup billing gensort valsort map red
@@ -53,7 +53,7 @@ reg: regtestprogs regtestfiles
 
 regtestprogs: $(REG_TESTS)
 
-regtestfiles: $(REG_FILES)
+regtestfiles: $(REG_FILES) word_100MB.txt
 
 perf: perftestprogs perftestfiles
 
