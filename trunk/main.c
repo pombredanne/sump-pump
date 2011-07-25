@@ -121,6 +121,21 @@ char Sump_usage[] =
     "\n"
     "In addition to being used on the sump program command line, these\n"
     "directives may also be specified in a 'SUMP_PUMP' environment variable.\n"
+    "\n"
+    "Copyright (C) 2011, Ordinal Technology Corp, http://www.ordinal.com\n"
+    "\n"
+    "This program is free software; you can redistribute it and/or\n"
+    "modify it under the terms of Version 2 of the GNU General Public\n"
+    "License as published by the Free Software Foundation.\n"
+    "\n"
+    "This program is distributed in the hope that it will be useful,\n"
+    "but WITHOUT ANY WARRANTY; without even the implied warranty of\n"
+    "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the\n"
+    "GNU General Public License for more details.\n"
+    "\n"
+    "You should have received a copy of the GNU General Public License\n"
+    "along with this program; if not, write to the Free Software Foundation,\n"
+    "Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.\n"
     ;
 
 int main(int argc, char *argv[])
