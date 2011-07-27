@@ -47,11 +47,9 @@ For more information on SUMP Pump, see:
 
 Contents
 --------
-   The include files directory
-      include/sump.h 
-      include/sump_win.h    (Windows only)
-      include/nsort.h
-      include/nsorterrno.h
+   The include files
+      sump.h 
+      sump_win.h            (Windows only)
 
    32,64 directories for executables and libraries
       {32,64}/sump          (Linux only)
@@ -65,11 +63,13 @@ Contents
 
 Directions
 ----------
-For sump executable, invoke it with no arguments to see self-documentation.
-For building programs that utilize the sump pump library:
+For sump executable, invoke it with no arguments to view1 self-documentation.
+
+For building programs that utilize the sump pump library, see comments in
+the sump.h file for documentation.  The compiler command line for building
+programs that use the sump pump library are as follows:
    On Linux
       gcc $(CFLAGS) -o my_sump_prog my_sump_prog.c libsump.so.1
 
    On Windows      
       cl $(CFLAGS) my_sump_prog.c libsump.lib
-
