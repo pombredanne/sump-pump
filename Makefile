@@ -33,7 +33,7 @@ default: $(LIB) sump
 all: default reg perf
 
 $(LIB): sump.o
-	gcc -o $(LIB) -shared \
+	gcc -o $(LIB) $(CFLAGS) -shared \
 	-Xlinker --version-script=exports.linux sump.o -lpthread -ldl -lrt
 
 # SUMP Pump object file. Optimization is not used in order to aid
