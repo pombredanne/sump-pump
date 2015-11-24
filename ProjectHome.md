@@ -1,0 +1,1 @@
+SUMP (Scale Up Multi-Processor) Pump™ is a subroutine library that allows programmers to quickly write programs that use multiple CMP/SMP processors and process file data at gigabyte-per-second speeds.
